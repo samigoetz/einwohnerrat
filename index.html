@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Übersicht Einwohnerrat · SP Neuhausen</title>
-<link rel="alternate" type="application/rss+xml" title="Einwohnerrat Neuhausen" href="feed.xml">
+<title>Neuhausen Politik</title>
+<link rel="alternate" type="application/rss+xml" title="Neuhausen Politik" href="feed.xml">
 <style>
   :root {
     --rot: #E2001A;
@@ -39,7 +39,7 @@
   }
   .statuszeile {
     display: flex; flex-wrap: wrap; align-items: center;
-    gap: 10px 16px; margin-top: 18px; font-size: 12.5px;
+    gap: 10px 16px; margin-top: 16px; font-size: 12.5px;
   }
   .status { flex: 1 1 auto; min-width: 200px; opacity: 0.95; }
   .dot {
@@ -49,19 +49,6 @@
   .dot.on { background: #fff; }
   .dot.err { background: var(--schwarz); }
 
-  button {
-    font: inherit; font-weight: 700; font-size: 13px; cursor: pointer;
-    border: 2px solid var(--weiss); background: var(--weiss); color: var(--rot);
-    padding: 8px 18px; border-radius: 0;
-    text-transform: uppercase; letter-spacing: 0.06em;
-    transition: background 0.12s ease, color 0.12s ease;
-  }
-  button:hover { background: transparent; color: var(--weiss); }
-  button:focus-visible { outline: 3px solid var(--schwarz); outline-offset: 2px; }
-  .auto { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; }
-  .auto label { cursor: pointer; user-select: none; }
-  .auto input { accent-color: var(--weiss); width: 15px; height: 15px; }
-
   .tabs {
     display: flex; border-bottom: 3px solid var(--schwarz);
     background: var(--weiss); position: sticky; top: 0; z-index: 20;
@@ -69,19 +56,18 @@
   .tab {
     flex: 1 1 auto; background: var(--weiss); color: var(--schwarz);
     border: none; border-right: 1px solid var(--linie);
-    padding: 15px 8px 13px; font-size: 13px; font-weight: 800;
-    text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer;
+    padding: 15px 6px 13px; font-size: 12.5px; font-weight: 800;
+    text-transform: uppercase; letter-spacing: 0.05em; cursor: pointer;
     transition: background 0.1s ease, color 0.1s ease;
   }
   .tab:last-child { border-right: none; }
   .tab:hover { background: var(--rosa); color: var(--rot-dunkel); }
   .tab.aktiv { background: var(--rot); color: var(--weiss); }
   .tab:focus-visible { outline: 3px solid var(--rot); outline-offset: -3px; }
-  .tab .anzahl { display: inline-block; margin-left: 5px; font-weight: 600; opacity: 0.75; font-size: 11px; }
+  .tab .anzahl { display: inline-block; margin-left: 5px; font-weight: 600; opacity: 0.75; font-size: 10.5px; }
 
   .panel { display: none; padding-top: 26px; }
   .panel.aktiv { display: block; }
-  .panel-hinweis { font-size: 13px; color: var(--grau); margin: 0 0 16px; }
 
   .filter { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; align-items: center; }
   .chip {
@@ -99,7 +85,20 @@
   }
   .suche:focus-visible { outline: 3px solid var(--rot); outline-offset: 1px; }
 
-  /* Mobiles Sortier-Auswahlfeld (nur auf schmalen Bildschirmen sichtbar) */
+  .volltext-schalter {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; cursor: pointer; user-select: none;
+  }
+  .volltext-schalter input { accent-color: var(--rot); width: 15px; height: 15px; cursor: pointer; }
+  .vt-status { font-size: 11px; color: var(--grau); font-weight: 600; text-transform: none; letter-spacing: 0; }
+  .vt-badge {
+    display: inline-block; margin-left: 8px; font-size: 10px; font-weight: 700;
+    letter-spacing: 0.05em; text-transform: uppercase;
+    background: var(--grau-hell); color: var(--grau); padding: 3px 7px;
+    white-space: nowrap;
+  }
+
   .mobil-sort { display: none; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
   .mobil-sort select {
     font: inherit; font-size: 13px; text-transform: none; letter-spacing: 0;
@@ -107,7 +106,6 @@
     background: var(--weiss); color: var(--schwarz);
   }
 
-  /* Tabellen: Seite scrollt als Ganzes, Spaltenzeile fix unter der Tab-Leiste */
   table.daten {
     width: 100%; border-collapse: collapse; font-size: 14px;
     border: 2px solid var(--schwarz);
@@ -142,14 +140,21 @@
   td.titel .beilagen { margin-top: 5px; display: flex; flex-wrap: wrap; gap: 3px 14px; }
   td.titel .beilagen a { font-size: 12px; color: var(--rot); text-decoration: none; font-weight: 600; border-bottom: none; }
   td.titel .beilagen a:hover { text-decoration: underline; }
+  td.titel .untertitel { display: block; font-size: 12.5px; font-weight: 600; color: var(--grau); margin-top: 2px; }
+  td.titel .anriss { display: block; font-size: 12.5px; color: var(--grau); margin-top: 4px; line-height: 1.45; }
   td.art-zelle { font-size: 12.5px; }
 
+  /* Vorstossarten in den Farben der Statistik */
   .art {
     display: inline-block; font-size: 10px; font-weight: 800;
     letter-spacing: 0.07em; text-transform: uppercase;
-    padding: 4px 8px; white-space: nowrap;
-    border: 1.5px solid var(--schwarz); color: var(--schwarz);
+    padding: 4px 8px; white-space: nowrap; color: var(--weiss);
   }
+  .art.art-ka { background: var(--rot); }
+  .art.art-ip { background: var(--schwarz); }
+  .art.art-po { background: var(--rosa-mittel); color: var(--schwarz); }
+  .art.art-mo { background: #9C9C9A; }
+
   .frak-badge {
     display: inline-block; font-size: 11px; font-weight: 700;
     padding: 3px 9px; background: var(--grau-hell); color: var(--schwarz);
@@ -251,19 +256,18 @@
     font-size: 12px; color: var(--grau); line-height: 1.65;
   }
   footer b { color: var(--schwarz); }
-  footer code { background: var(--grau-hell); padding: 1px 5px; font-size: 11px; }
   footer a { color: var(--rot); font-weight: 600; }
   .reset {
     background: none; border: none; color: var(--rot); padding: 0;
     font-size: inherit; font-weight: 600; text-decoration: underline;
-    cursor: pointer; text-transform: none; letter-spacing: 0;
+    cursor: pointer; font-family: inherit;
   }
-  .reset:hover { background: none; color: var(--rot-dunkel); }
+  .reset:hover { color: var(--rot-dunkel); }
 
   /* ---------- Mobil: Kartenlayout ---------- */
   @media (max-width: 680px) {
     .mobil-sort { display: flex; flex: 1 1 100%; }
-    .tab { font-size: 10px; letter-spacing: 0.02em; padding: 12px 4px 10px; }
+    .tab { font-size: 9px; letter-spacing: 0.01em; padding: 12px 3px 10px; }
     .tab .anzahl { display: none; }
 
     table.daten { display: block; border-width: 2px; }
@@ -303,16 +307,11 @@
 
 <div class="kopf">
   <div class="wrap">
-    <h1>Übersicht Einwohnerrat</h1>
+    <h1>Neuhausen Politik</h1>
     <div class="statuszeile">
       <div class="status">
         <span class="dot" id="dot"></span><span id="statustext">Lade Daten …</span>
       </div>
-      <div class="auto">
-        <input type="checkbox" id="autochk">
-        <label for="autochk">Auto (10 Min.)</label>
-      </div>
-      <button id="pruefen">Aktualisieren</button>
     </div>
   </div>
 </div>
@@ -322,13 +321,13 @@
   <button class="tab" data-panel="berichte">Berichte &amp; Anträge<span class="anzahl" id="tabzahl-b"></span></button>
   <button class="tab" data-panel="protokolle">Beschlüsse &amp; Protokolle<span class="anzahl" id="tabzahl-p"></span></button>
   <button class="tab" data-panel="statistik">Statistik</button>
+  <button class="tab" data-panel="aktuelles">Aktuelles<span class="anzahl" id="tabzahl-a"></span></button>
 </nav>
 
 <div class="wrap">
 
   <!-- TAB: VORSTÖSSE -->
   <section class="panel aktiv" id="panel-vorstoesse">
-    <p class="panel-hinweis">Kleine Anfragen, Interpellationen, Postulate und Motionen. Neueste zuoberst.</p>
     <div class="filter" id="filter">
       <button class="chip aktiv" data-art="alle">Alle</button>
       <button class="chip" data-art="Kleine Anfrage">Kleine Anfragen</button>
@@ -336,6 +335,7 @@
       <button class="chip" data-art="Postulat">Postulate</button>
       <button class="chip" data-art="Motion">Motionen</button>
       <input type="text" class="suche" id="suche" placeholder="Suche Person, Fraktion oder Titel …">
+      <label class="volltext-schalter"><input type="checkbox" id="vt-v"> Volltext <span class="vt-status" id="vt-status-v"></span></label>
       <label class="mobil-sort">Sortieren
         <select id="sort-v">
           <option value="datum|-1" selected>Datum (neuste zuerst)</option>
@@ -367,9 +367,9 @@
 
   <!-- TAB: BERICHTE & ANTRÄGE -->
   <section class="panel" id="panel-berichte">
-    <p class="panel-hinweis">Vollständige Liste, neueste zuoberst.</p>
     <div class="filter">
       <input type="text" class="suche" id="ba-suche" placeholder="Suche Titel, Beilage oder Art …">
+      <label class="volltext-schalter"><input type="checkbox" id="vt-b"> Volltext <span class="vt-status" id="vt-status-b"></span></label>
       <label class="mobil-sort">Sortieren
         <select id="sort-b">
           <option value="datum|-1" selected>Datum (neuste zuerst)</option>
@@ -397,9 +397,9 @@
 
   <!-- TAB: BESCHLÜSSE & PROTOKOLLE -->
   <section class="panel" id="panel-protokolle">
-    <p class="panel-hinweis">Beschlüsse und Sitzungsprotokolle des Einwohnerrats, neueste zuoberst.</p>
     <div class="filter">
       <input type="text" class="suche" id="bp-suche" placeholder="Suche Inhalt oder Nummer …">
+      <label class="volltext-schalter"><input type="checkbox" id="vt-p"> Volltext <span class="vt-status" id="vt-status-p"></span></label>
       <label class="mobil-sort">Sortieren
         <select id="sort-p">
           <option value="datum|-1" selected>Datum (neuste zuerst)</option>
@@ -429,18 +429,46 @@
     <div id="stat-bereich"><p class="leer">Wird geladen …</p></div>
   </section>
 
+  <!-- TAB: AKTUELLES -->
+  <section class="panel" id="panel-aktuelles">
+    <div class="filter">
+      <input type="text" class="suche" id="ak-suche" placeholder="Suche in Meldungen …">
+      <label class="mobil-sort">Sortieren
+        <select id="sort-a">
+          <option value="datum|-1" selected>Datum (neuste zuerst)</option>
+          <option value="datum|1">Datum (älteste zuerst)</option>
+          <option value="titel|1">Titel</option>
+        </select>
+      </label>
+    </div>
+    <table class="daten" id="tabelle-aktuelles">
+      <thead>
+        <tr>
+          <th data-sort="datum" class="sortiert">Datum<span class="pfeil">▼</span></th>
+          <th data-sort="titel">Meldung<span class="pfeil"></span></th>
+        </tr>
+      </thead>
+      <tbody id="ak-body">
+        <tr><td colspan="2" class="leer">Wird geladen …</td></tr>
+      </tbody>
+    </table>
+  </section>
+
   <footer>
     <p>
-      Die Daten stammen von neuhausen.ch und werden vom Skript
-      <code>neuhausen_daten.py</code> aufbereitet: online automatisch stündlich
-      (GitHub Actions), lokal per Terminal-Lauf. <b>Neu hinzugekommene Einträge</b>
-      werden in diesem Browser rot hervorgehoben; beim allerersten Laden gilt alles
-      als bekannt. Neuigkeiten lassen sich auch als
-      <a href="feed.xml">RSS-Feed</a> abonnieren (Adresse der Datei
-      <code>feed.xml</code> in eine Feedreader-App eintragen).
-      Fraktionszuordnungen pflegst du in der Liste <code>FRAKTIONEN</code> im Skript.
+      Diese unabhängige Übersicht bereitet öffentlich zugängliche Informationen der
+      Gemeinde Neuhausen am Rheinfall auf. Alle Inhalte stammen von
+      <a href="https://neuhausen.ch" target="_blank" rel="noopener">neuhausen.ch</a>
+      und werden automatisch etwa viertelstündlich abgeglichen; massgeblich sind
+      stets die Originaldokumente der Gemeinde. <b>Neu hinzugekommene Einträge</b>
+      werden in deinem Browser rot markiert (beim ersten Besuch gilt alles als bekannt).
+      Neuigkeiten lassen sich als <a href="feed.xml">RSS-Feed</a> abonnieren.
+      Mit dem Schalter <b>Volltext</b> durchsucht die Suche auch die Inhalte der
+      verlinkten PDF-Dokumente; eingescannte Dokumente werden per automatischer
+      Texterkennung erfasst. Die Fraktionszuordnungen wurden manuell erstellt,
+      Fehler sind möglich.
     </p>
-    <p>Neu aufsetzen? <button class="reset" id="reset">Gespeicherten Stand löschen</button></p>
+    <p>Markierungen zurücksetzen? <button class="reset" id="reset">Gespeicherten Lesestand löschen</button></p>
   </footer>
 
 </div>
@@ -451,20 +479,21 @@
   "use strict";
 
   var SPEICHER_KEY = "neuhausen_monitor_stand_v2";
-  var AUTO_KEY = "neuhausen_monitor_auto_v2";
-  var AUTO_INTERVALL = 10 * 60 * 1000;
-  var autoTimer = null;
+  var RELOAD_INTERVALL = 15 * 60 * 1000; // Seite lädt sich still alle 15 Min. neu
 
   var vorstoesse = [];
   var baEintraege = [];
   var bpEintraege = [];
+  var akEintraege = [];
   var aktiverFilter = "alle";
   var suchText = "";
   var baSuchText = "";
   var bpSuchText = "";
+  var akSuchText = "";
   var vSort = { feld: "datum", richtung: -1 };
   var bSort = { feld: "datum", richtung: -1 };
   var pSort = { feld: "datum", richtung: -1 };
+  var aSort = { feld: "datum", richtung: -1 };
   var jahrFilter = "alle";
 
   var ART_FARBEN = { ka: "farb-ka", ip: "farb-ip", po: "farb-po", mo: "farb-mo" };
@@ -486,9 +515,62 @@
     "Volksmotion": ["#555555", "#FFFFFF"]
   };
 
+  var AKTUELLES_URL = "https://neuhausen.ch/aktuelles";
+
   var $ = function (id) { return document.getElementById(id); };
   function istMobil() { return window.matchMedia("(max-width: 680px)").matches; }
 
+  // ---- Volltextsuche: laedt volltext.js erst bei Aktivierung nach ----------
+  var volltextAktiv = { v: false, b: false, p: false };
+  var volltextZustand = "aus"; // aus | laedt | bereit | fehler
+
+  function volltextBereit() {
+    return volltextZustand === "bereit" && window.NEUHAUSEN_VOLLTEXT;
+  }
+  function zeigeVtStatus(text) {
+    ["vt-status-v", "vt-status-b", "vt-status-p"].forEach(function (id) {
+      var el = $(id); if (el) el.textContent = text;
+    });
+  }
+  function ladeVolltext() {
+    if (volltextZustand === "bereit" || volltextZustand === "laedt") return;
+    volltextZustand = "laedt";
+    zeigeVtStatus("l\u00e4dt \u2026");
+    var s = document.createElement("script");
+    s.src = "volltext.js?v=" + Date.now();
+    s.onload = function () {
+      if (window.NEUHAUSEN_VOLLTEXT) {
+        volltextZustand = "bereit";
+        var n = 0, alle = window.NEUHAUSEN_VOLLTEXT;
+        for (var k in alle) { if (alle[k] && alle[k].t) n++; }
+        zeigeVtStatus("(" + n + " Dokumente)");
+      } else {
+        volltextZustand = "fehler";
+        zeigeVtStatus("nicht verf\u00fcgbar");
+      }
+      rendereVorstoesse(); rendereBA(); rendereBP();
+    };
+    s.onerror = function () {
+      volltextZustand = "fehler";
+      zeigeVtStatus("nicht verf\u00fcgbar");
+      rendereVorstoesse(); rendereBA(); rendereBP();
+    };
+    document.body.appendChild(s);
+  }
+  function vtTreffer(urls, q) {
+    var VT = window.NEUHAUSEN_VOLLTEXT;
+    if (!VT) return false;
+    for (var i = 0; i < urls.length; i++) {
+      var u = urls[i];
+      if (!u) continue;
+      var e = VT[u];
+      if (e && e.t && e.t.indexOf(q) >= 0) return true;
+    }
+    return false;
+  }
+
+  // Tab-Leisten-Hoehe exakt messen, damit die fixierte Spaltenzeile
+  // buendig darunter sitzt und keine Zeile dahinter verschwinden kann.
   function messeKopfOffset() {
     var h = $("tabs").offsetHeight;
     document.documentElement.style.setProperty("--kopf-offset", h + "px");
@@ -533,9 +615,15 @@
 
     var gefiltert = vorstoesse.filter(function (v) {
       if (aktiverFilter !== "alle" && v.art !== aktiverFilter) return false;
+      v._nurVolltext = false;
       if (suchText) {
         var hay = (v.person + " " + v.titel + " " + v.nummer + " " + frakText(v)).toLowerCase();
-        if (hay.indexOf(suchText) < 0) return false;
+        var treffer = hay.indexOf(suchText) >= 0;
+        if (!treffer && volltextAktiv.v && volltextBereit()) {
+          treffer = vtTreffer([v.url, v.antwortUrl], suchText);
+          v._nurVolltext = treffer;
+        }
+        if (!treffer) return false;
       }
       return true;
     });
@@ -579,12 +667,18 @@
           ant.textContent = "\u21b3 Antwort";
           tdT.appendChild(ant);
         }
+        if (v._nurVolltext) {
+          var vb = document.createElement("span");
+          vb.className = "vt-badge"; vb.textContent = "Treffer im Dokument";
+          tdT.appendChild(vb);
+        }
         tr.appendChild(tdT);
 
         var tdA = document.createElement("td");
         tdA.className = "art-zelle";
         var art = document.createElement("span");
-        art.className = "art"; art.textContent = v.art;
+        art.className = "art art-" + v.kuerzel;
+        art.textContent = v.art;
         tdA.appendChild(art);
         tr.appendChild(tdA);
 
@@ -629,10 +723,17 @@
     body.innerHTML = "";
 
     var liste = baEintraege.filter(function (e) {
+      e._nurVolltext = false;
       if (!baSuchText) return true;
       var hay = (e.haupt.titel + " " + (e.art || "") + " " +
         (e.beilagen || []).map(function (b) { return b.titel; }).join(" ")).toLowerCase();
-      return hay.indexOf(baSuchText) >= 0;
+      var treffer = hay.indexOf(baSuchText) >= 0;
+      if (!treffer && volltextAktiv.b && volltextBereit()) {
+        var urls = [e.haupt.url].concat((e.beilagen || []).map(function (b) { return b.url; }));
+        treffer = vtTreffer(urls, baSuchText);
+        e._nurVolltext = treffer;
+      }
+      return treffer;
     });
 
     liste.sort(function (a, b) {
@@ -667,6 +768,11 @@
         a.href = e.haupt.url; a.target = "_blank"; a.rel = "noopener";
         a.textContent = e.haupt.titel;
         tdT.appendChild(a);
+        if (e._nurVolltext) {
+          var vb = document.createElement("span");
+          vb.className = "vt-badge"; vb.textContent = "Treffer im Dokument";
+          tdT.appendChild(vb);
+        }
         if (e.beilagen && e.beilagen.length) {
           var bl = document.createElement("div");
           bl.className = "beilagen";
@@ -705,10 +811,17 @@
     body.innerHTML = "";
 
     var liste = bpEintraege.filter(function (e) {
+      e._nurVolltext = false;
       if (!bpSuchText) return true;
       var hay = (e.haupt.titel + " " + (e.nummer || "") + " " +
         (e.beilagen || []).map(function (b) { return b.titel; }).join(" ")).toLowerCase();
-      return hay.indexOf(bpSuchText) >= 0;
+      var treffer = hay.indexOf(bpSuchText) >= 0;
+      if (!treffer && volltextAktiv.p && volltextBereit()) {
+        var urls = [e.haupt.url].concat((e.beilagen || []).map(function (b) { return b.url; }));
+        treffer = vtTreffer(urls, bpSuchText);
+        e._nurVolltext = treffer;
+      }
+      return treffer;
     });
 
     liste.sort(function (a, b) {
@@ -748,6 +861,11 @@
         a.href = e.haupt.url; a.target = "_blank"; a.rel = "noopener";
         a.textContent = e.haupt.titel;
         tdT.appendChild(a);
+        if (e._nurVolltext) {
+          var vb = document.createElement("span");
+          vb.className = "vt-badge"; vb.textContent = "Treffer im Dokument";
+          tdT.appendChild(vb);
+        }
         if (e.beilagen && e.beilagen.length) {
           var bl = document.createElement("div");
           bl.className = "beilagen";
@@ -765,6 +883,66 @@
       });
     }
     $("tabzahl-p").textContent = "(" + bpEintraege.length + ")";
+  }
+
+  // ---- Rendering: Aktuelles ------------------------------------------------------
+  function rendereAK() {
+    var body = $("ak-body");
+    body.innerHTML = "";
+
+    var liste = akEintraege.filter(function (e) {
+      if (!akSuchText) return true;
+      var hay = (e.titel + " " + (e.untertitel || "") + " " + (e.anriss || "")).toLowerCase();
+      return hay.indexOf(akSuchText) >= 0;
+    });
+
+    liste.sort(function (a, b) {
+      var f = aSort.feld, av, bv;
+      if (f === "datum") { av = a.datumZ; bv = b.datumZ; }
+      else { av = (a[f] || "").toLowerCase(); bv = (b[f] || "").toLowerCase(); }
+      if (av < bv) return -1 * aSort.richtung;
+      if (av > bv) return 1 * aSort.richtung;
+      return b.datumZ - a.datumZ;
+    });
+
+    if (!liste.length) {
+      body.innerHTML = '<tr><td colspan="2" class="leer">Keine Eintr\u00e4ge f\u00fcr diese Auswahl.</td></tr>';
+    } else {
+      liste.forEach(function (e) {
+        var tr = document.createElement("tr");
+        if (e._neu) tr.className = "neu";
+
+        var tdD = document.createElement("td");
+        tdD.className = "datum"; tdD.textContent = e.datum;
+        tr.appendChild(tdD);
+
+        var tdT = document.createElement("td");
+        tdT.className = "titel";
+        if (e._neu) {
+          var mm = document.createElement("span");
+          mm.className = "marke-neu"; mm.textContent = "Neu";
+          tdT.appendChild(mm);
+        }
+        var a = document.createElement("a");
+        a.href = AKTUELLES_URL; a.target = "_blank"; a.rel = "noopener";
+        a.textContent = e.titel;
+        tdT.appendChild(a);
+        if (e.untertitel) {
+          var u = document.createElement("span");
+          u.className = "untertitel"; u.textContent = e.untertitel;
+          tdT.appendChild(u);
+        }
+        if (e.anriss) {
+          var an = document.createElement("span");
+          an.className = "anriss"; an.textContent = e.anriss;
+          tdT.appendChild(an);
+        }
+        tr.appendChild(tdT);
+
+        body.appendChild(tr);
+      });
+    }
+    $("tabzahl-a").textContent = "(" + akEintraege.length + ")";
   }
 
   // ---- Rendering: Statistik ----------------------------------------------------
@@ -979,7 +1157,6 @@
       s.appendChild(stab);
       var lab = document.createElement("div");
       lab.className = "lab";
-      // Auf schmalen Bildschirmen Kurzform und nur jedes zweite Jahr anschreiben
       if (mobil) {
         lab.textContent = (jahre.length > 10 && idx % 2 === 1) ? "" : "\u2019" + j.slice(2);
       } else {
@@ -1002,6 +1179,7 @@
     vorstoesse = [];
     baEintraege = [];
     bpEintraege = [];
+    akEintraege = [];
 
     function nimm(liste, ziel) {
       (liste || []).forEach(function (e) {
@@ -1015,24 +1193,26 @@
     nimm(d.vorstoesse, vorstoesse);
     nimm(d.berichte, baEintraege);
     nimm(d.beschluesse, bpEintraege);
+    nimm(d.aktuelles, akEintraege);
 
     stand.bekannt = bekannt;
     speichereStand(stand);
     rendereVorstoesse();
     rendereBA();
     rendereBP();
+    rendereAK();
     rendereJahrFilter();
     rendereStatistik();
 
-    var basis = "Datenstand " + (d.erzeugt || "?");
+    var basis = "Datenstand " + (d.erzeugt || "?") +
+      " \u00b7 Quelle: neuhausen.ch \u00b7 aktualisiert viertelst\u00fcndlich";
     var teilfehler = (d.fehler && d.fehler.length) ? " \u00b7 Teilfehler: " + d.fehler.join(", ") : "";
     if (ersterLauf) {
-      setStatus(basis + " \u00b7 Ausgangsstand gespeichert" + teilfehler, "on");
+      setStatus(basis + teilfehler, "on");
     } else if (neueGesamt) {
       setStatus(neueGesamt + " neu \u00b7 " + basis + teilfehler, "on");
-      benachrichtige(neueGesamt);
     } else {
-      setStatus("Nichts Neues \u00b7 " + basis + teilfehler, teilfehler ? "err" : "on");
+      setStatus(basis + teilfehler, teilfehler ? "err" : "on");
     }
   }
 
@@ -1041,34 +1221,16 @@
     if (window.NEUHAUSEN_DATEN) {
       verarbeite(window.NEUHAUSEN_DATEN);
     } else {
-      setStatus("Noch keine Daten vorhanden \u2013 bitte die Aktualisierung einmal laufen lassen.", "err");
+      setStatus("Daten werden vorbereitet \u2013 bitte sp\u00e4ter erneut laden.", "err");
       $("vorstoss-body").innerHTML =
-        '<tr><td colspan="6" class="leer">Keine Daten. Auf GitHub: Actions \u2192 \u00abDaten aktualisieren\u00bb \u2192 Run workflow. Lokal: <code>python3 neuhausen_daten.py</code> ausf\u00fchren.</td></tr>';
-      $("ba-body").innerHTML = '<tr><td colspan="4" class="leer">Keine Daten.</td></tr>';
-      $("bp-body").innerHTML = '<tr><td colspan="3" class="leer">Keine Daten.</td></tr>';
-      $("stat-bereich").innerHTML = '<p class="leer">Keine Daten.</p>';
+        '<tr><td colspan="6" class="leer">Noch keine Daten vorhanden.</td></tr>';
+      $("ba-body").innerHTML = '<tr><td colspan="4" class="leer">Noch keine Daten vorhanden.</td></tr>';
+      $("bp-body").innerHTML = '<tr><td colspan="3" class="leer">Noch keine Daten vorhanden.</td></tr>';
+      $("ak-body").innerHTML = '<tr><td colspan="2" class="leer">Noch keine Daten vorhanden.</td></tr>';
+      $("stat-bereich").innerHTML = '<p class="leer">Noch keine Daten vorhanden.</p>';
     }
-  }
-
-  function benachrichtige(anzahl) {
-    if (!("Notification" in window) || Notification.permission !== "granted") return;
-    try {
-      new Notification("SP Neuhausen \u00b7 Einwohnerrat",
-        { body: anzahl + " neue Eintr\u00e4ge auf neuhausen.ch" });
-    } catch (e) {}
-  }
-  function frageBenachrichtigung() {
-    if ("Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission();
-    }
-  }
-  function setzeAuto(an) {
-    localStorage.setItem(AUTO_KEY, an ? "1" : "0");
-    if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
-    if (an) {
-      frageBenachrichtigung();
-      autoTimer = setInterval(function () { location.reload(); }, AUTO_INTERVALL);
-    }
+    // Stille Selbstaktualisierung im 15-Minuten-Takt
+    setInterval(function () { location.reload(); }, RELOAD_INTERVALL);
   }
 
   // ---- Verdrahtung -------------------------------------------------------------------
@@ -1081,9 +1243,6 @@
       window.scrollTo(0, 0);
     });
   });
-
-  $("pruefen").addEventListener("click", function () { location.reload(); });
-  $("autochk").addEventListener("change", function () { setzeAuto(this.checked); });
 
   $("filter").addEventListener("click", function (e) {
     var chip = e.target.closest(".chip");
@@ -1107,6 +1266,10 @@
     bpSuchText = this.value.toLowerCase().trim();
     rendereBP();
   });
+  $("ak-suche").addEventListener("input", function () {
+    akSuchText = this.value.toLowerCase().trim();
+    rendereAK();
+  });
 
   function sortierungVerdrahten(tabelleId, sortObjekt, renderFn) {
     document.querySelectorAll("#" + tabelleId + " thead th").forEach(function (th) {
@@ -1128,6 +1291,7 @@
   sortierungVerdrahten("tabelle-vorstoesse", vSort, rendereVorstoesse);
   sortierungVerdrahten("tabelle-berichte", bSort, rendereBA);
   sortierungVerdrahten("tabelle-protokolle", pSort, rendereBP);
+  sortierungVerdrahten("tabelle-aktuelles", aSort, rendereAK);
 
   function mobilSortVerdrahten(selectId, sortObjekt, renderFn) {
     $(selectId).addEventListener("change", function () {
@@ -1140,8 +1304,19 @@
   mobilSortVerdrahten("sort-v", vSort, rendereVorstoesse);
   mobilSortVerdrahten("sort-b", bSort, rendereBA);
   mobilSortVerdrahten("sort-p", pSort, rendereBP);
+  mobilSortVerdrahten("sort-a", aSort, rendereAK);
 
-  // Bei Wechsel zwischen Handy- und Desktopbreite Statistik neu zeichnen
+  function volltextSchalter(id, schluessel, renderFn) {
+    $(id).addEventListener("change", function () {
+      volltextAktiv[schluessel] = this.checked;
+      if (this.checked) ladeVolltext();
+      renderFn();
+    });
+  }
+  volltextSchalter("vt-v", "v", rendereVorstoesse);
+  volltextSchalter("vt-b", "b", rendereBA);
+  volltextSchalter("vt-p", "p", rendereBP);
+
   var warMobil = istMobil();
   window.addEventListener("resize", function () {
     if (istMobil() !== warMobil) {
@@ -1151,15 +1326,11 @@
   });
 
   $("reset").addEventListener("click", function () {
-    if (confirm("Gespeicherten Stand l\u00f6schen? Beim n\u00e4chsten Laden gilt wieder alles als bekannt.")) {
+    if (confirm("Gespeicherten Lesestand l\u00f6schen? Beim n\u00e4chsten Laden gilt wieder alles als bekannt.")) {
       localStorage.removeItem(SPEICHER_KEY);
-      setStatus("Stand gel\u00f6scht. Seite neu laden zum Neuaufsetzen.", null);
+      setStatus("Lesestand gel\u00f6scht. Seite neu laden zum Neuaufsetzen.", null);
     }
   });
-
-  var autoAn = localStorage.getItem(AUTO_KEY) === "1";
-  $("autochk").checked = autoAn;
-  if (autoAn) setzeAuto(true);
 
   starte();
 })();

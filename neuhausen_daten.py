@@ -11,7 +11,11 @@ Automatisierung:  per Cron oder launchd regelmaessig ausfuehren.
 
 import json
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
+import time
 import unicodedata
 from datetime import datetime
 from pathlib import Path
@@ -36,7 +40,12 @@ VORSTOSS_QUELLEN = [
 ]
 BA_URL = "https://neuhausen.ch/berichte_antraege"
 BP_URL = "https://neuhausen.ch/beschluesse_protokolle"
+AKTUELLES_URL = "https://neuhausen.ch/aktuelles"
 FEED_AUSGABE = BASIS / "feed.xml"
+VOLLTEXT_AUSGABE = BASIS / "volltext.js"
+VOLLTEXT_MAX_ZEICHEN = 150000   # Textobergrenze pro Dokument
+OCR_MAX_SEITEN = 40             # OCR hoechstens fuer so viele Seiten pro PDF
+OCR_AUFLOESUNG = 200            # dpi fuer die Texterkennung
 
 # ---------------------------------------------------------------------------
 # FRAKTIONSZUORDNUNG  (bitte selbst ergaenzen und korrigieren!)
@@ -405,6 +414,164 @@ def parse_beschluesse(html: str) -> list:
     return ergebnis
 
 
+# ---------------------------------------------------------------------------
+# Volltext-Erfassung: extrahiert den Text aller verlinkten PDFs fuer die
+# Volltextsuche. Bereits verarbeitete Dokumente werden aus volltext.js
+# wiederverwendet (Zwischenspeicher), nur Neues wird heruntergeladen.
+# Scans ohne Textebene werden per Texterkennung (tesseract) erfasst,
+# sofern die Werkzeuge vorhanden sind (auf GitHub: ja).
+# ---------------------------------------------------------------------------
+
+def _lade_volltext_cache() -> dict:
+    if not VOLLTEXT_AUSGABE.exists():
+        return {}
+    try:
+        roh = VOLLTEXT_AUSGABE.read_text(encoding="utf-8")
+        start = roh.find("{")
+        ende = roh.rfind("}")
+        cache = json.loads(roh[start:ende + 1])
+        return cache if isinstance(cache, dict) else {}
+    except Exception:
+        return {}
+
+
+def _normalisiere_volltext(text: str) -> str:
+    text = unicodedata.normalize("NFC", text or "")
+    text = re.sub(r"\s+", " ", text).strip().lower()
+    return text[:VOLLTEXT_MAX_ZEICHEN]
+
+
+def _pdf_text(daten: bytes) -> str:
+    """Textebene eines PDFs auslesen (leer, wenn keine vorhanden)."""
+    from pypdf import PdfReader
+    import io
+    leser = PdfReader(io.BytesIO(daten))
+    if getattr(leser, "is_encrypted", False):
+        try:
+            leser.decrypt("")
+        except Exception:
+            return ""
+    teile = []
+    for seite in leser.pages:
+        teile.append(seite.extract_text() or "")
+        if sum(len(t) for t in teile) > VOLLTEXT_MAX_ZEICHEN:
+            break
+    return " ".join(teile)
+
+
+def _ocr_moeglich() -> bool:
+    return bool(shutil.which("tesseract") and shutil.which("pdftoppm"))
+
+
+def _ocr_text(daten: bytes) -> str:
+    """Texterkennung fuer Scans: PDF zu Bildern, dann tesseract (Deutsch)."""
+    with tempfile.TemporaryDirectory() as ordner:
+        pfad = Path(ordner)
+        (pfad / "dok.pdf").write_bytes(daten)
+        subprocess.run(
+            ["pdftoppm", "-r", str(OCR_AUFLOESUNG), "-png",
+             "-l", str(OCR_MAX_SEITEN), "dok.pdf", "seite"],
+            cwd=ordner, check=True, capture_output=True, timeout=300,
+        )
+        teile = []
+        for bild in sorted(pfad.glob("seite*.png")):
+            ergebnis = subprocess.run(
+                ["tesseract", str(bild), "stdout", "-l", "deu"],
+                capture_output=True, timeout=300,
+            )
+            teile.append(ergebnis.stdout.decode("utf-8", errors="ignore"))
+            if sum(len(t) for t in teile) > VOLLTEXT_MAX_ZEICHEN:
+                break
+        return " ".join(teile)
+
+
+def _hole_pdf(url: str) -> bytes:
+    resp = requests.get(url, headers=HEADERS, timeout=60)
+    resp.raise_for_status()
+    return resp.content
+
+
+def _sammle_dokument_urls(vorstoesse, berichte, beschluesse) -> list:
+    urls = []
+    gesehen = set()
+
+    def nimm(u):
+        if u and "/fileupload/" in u and u not in gesehen:
+            gesehen.add(u)
+            urls.append(u)
+
+    for v in vorstoesse:
+        nimm(v.get("url"))
+        nimm(v.get("antwortUrl"))
+    for gruppe in (berichte, beschluesse):
+        for e in gruppe:
+            nimm(e.get("haupt", {}).get("url"))
+            for b in e.get("beilagen", []):
+                nimm(b.get("url"))
+    return urls
+
+
+def baue_volltext(vorstoesse, berichte, beschluesse) -> None:
+    try:
+        import pypdf  # noqa: F401
+    except ImportError:
+        print("Volltext uebersprungen: pypdf fehlt "
+              "(Installation: python3 -m pip install --user pypdf)")
+        return
+
+    cache = _lade_volltext_cache()
+    urls = _sammle_dokument_urls(vorstoesse, berichte, beschluesse)
+    kann_ocr = _ocr_moeglich()
+
+    # Erneut versuchen, was frueher scheiterte oder mangels OCR offen blieb
+    offen = [u for u in urls
+             if u not in cache
+             or cache[u].get("q") in ("fehler",)
+             or (cache[u].get("q") == "ocr_fehlt" and kann_ocr)]
+
+    neu = ocr_n = leer = fehler = 0
+    for i, url in enumerate(offen, 1):
+        try:
+            daten = _hole_pdf(url)
+            text = _pdf_text(daten)
+            if len(text.strip()) >= 50:
+                cache[url] = {"t": _normalisiere_volltext(text), "q": "pdf"}
+            elif kann_ocr:
+                try:
+                    ocr = _ocr_text(daten)
+                    if len(ocr.strip()) >= 50:
+                        cache[url] = {"t": _normalisiere_volltext(ocr), "q": "ocr"}
+                        ocr_n += 1
+                    else:
+                        cache[url] = {"t": "", "q": "leer"}
+                        leer += 1
+                except Exception:
+                    cache[url] = {"t": "", "q": "fehler"}
+                    fehler += 1
+            else:
+                cache[url] = {"t": "", "q": "ocr_fehlt"}
+            neu += 1
+        except Exception:
+            cache[url] = {"t": "", "q": "fehler"}
+            fehler += 1
+        if i % 25 == 0 or i == len(offen):
+            print(f"  Volltext: {i}/{len(offen)} neue Dokumente verarbeitet")
+        time.sleep(0.15)
+
+    js = "window.NEUHAUSEN_VOLLTEXT = " + json.dumps(cache, ensure_ascii=False) + ";\n"
+    VOLLTEXT_AUSGABE.write_text(js, encoding="utf-8")
+
+    erfasst = sum(1 for e in cache.values() if e.get("q") in ("pdf", "ocr"))
+    ohne = sum(1 for e in cache.values() if e.get("q") == "leer")
+    ausstehend = sum(1 for e in cache.values() if e.get("q") == "ocr_fehlt")
+    print(f"Volltext: {erfasst} von {len(cache)} Dokumenten erfasst "
+          f"(neu: {neu}, davon OCR: {ocr_n}, ohne Text: {ohne}, Fehler: {fehler})")
+    if ausstehend and not kann_ocr:
+        print(f"  Hinweis: {ausstehend} Scans warten auf Texterkennung; "
+              "die passiert automatisch beim naechsten GitHub-Lauf "
+              "(lokal: tesseract und poppler installieren).")
+
+
 _WOCHENTAGE = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 _MONATE = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -422,7 +589,7 @@ def _rfc822(datum: str) -> str:
             f"{_MONATE[dt.month - 1]} {dt.year} 12:00:00 {offset}")
 
 
-def baue_feed(vorstoesse: list, berichte: list, beschluesse: list) -> str:
+def baue_feed(vorstoesse: list, berichte: list, beschluesse: list, aktuelles: list) -> str:
     """Erzeugt einen RSS-2.0-Feed mit den neuesten Eintraegen aller Bereiche."""
     from xml.sax.saxutils import escape
 
@@ -445,6 +612,11 @@ def baue_feed(vorstoesse: list, berichte: list, beschluesse: list) -> str:
         eintraege.append({
             "titel": f"[Beschluss/Protokoll] {p['haupt']['titel']}",
             "url": p["haupt"]["url"], "datum": p["datum"], "id": p["schluessel"],
+        })
+    for a in aktuelles:
+        eintraege.append({
+            "titel": f"[Aktuelles] {a['titel']}",
+            "url": AKTUELLES_URL, "datum": a["datum"], "id": a["schluessel"],
         })
 
     eintraege.sort(key=lambda e: datum_zahl(e["datum"]), reverse=True)
@@ -482,10 +654,64 @@ def baue_feed(vorstoesse: list, berichte: list, beschluesse: list) -> str:
     return "\n".join(teile) + "\n"
 
 
+def parse_aktuelles(html: str) -> list:
+    """
+    Aktuelles-Seite: Meldungen als Ueberschriften-Folge
+      h2 = Titel, optional h3 = Untertitel, h4 = Datum (tt.mm.jjjj),
+      danach Absaetze mit dem Meldungstext.
+    Es wird ein kurzer Anriss (max. ~260 Zeichen) erzeugt.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    ergebnis = []
+    gesehen = set()
+    aktuell = None
+
+    def abschliessen():
+        nonlocal aktuell
+        if aktuell and aktuell["datum"] and aktuell["titel"]:
+            anriss = re.sub(r"\s+", " ", " ".join(aktuell["absaetze"])).strip()
+            if len(anriss) > 260:
+                anriss = anriss[:260].rsplit(" ", 1)[0] + " \u2026"
+            schluessel = f"ak|{aktuell['datum']}|{aktuell['titel']}"
+            if schluessel not in gesehen:
+                gesehen.add(schluessel)
+                ergebnis.append({
+                    "schluessel": schluessel,
+                    "datum": aktuell["datum"],
+                    "titel": aktuell["titel"],
+                    "untertitel": aktuell["untertitel"],
+                    "anriss": anriss,
+                })
+        aktuell = None
+
+    for el in soup.find_all(["h2", "h3", "h4", "p"]):
+        text = sauber(el.get_text())
+        if el.name == "h2":
+            abschliessen()
+            if text:
+                aktuell = {"titel": text, "untertitel": "", "datum": "",
+                           "absaetze": []}
+        elif aktuell is None:
+            continue
+        elif el.name == "h3":
+            if not aktuell["datum"] and not aktuell["untertitel"]:
+                aktuell["untertitel"] = text
+        elif el.name == "h4":
+            if DATUM_RE.match(text):
+                aktuell["datum"] = text
+        elif el.name == "p":
+            if aktuell["datum"] and text and len(" ".join(aktuell["absaetze"])) < 400:
+                aktuell["absaetze"].append(text)
+
+    abschliessen()
+    return ergebnis
+
+
 def main():
     vorstoesse = []
     berichte = []
     beschluesse = []
+    aktuelles = []
     fehler = []
 
     for quelle in VORSTOSS_QUELLEN:
@@ -514,12 +740,21 @@ def main():
         fehler.append(f"Beschluesse & Protokolle: {e}")
         print(f"  Beschl.&Protokolle FEHLER: {e}", file=sys.stderr)
 
+    try:
+        html = hole(AKTUELLES_URL)
+        aktuelles = parse_aktuelles(html)
+        print(f"  Aktuelles         {len(aktuelles):>3} Eintraege")
+    except Exception as e:
+        fehler.append(f"Aktuelles: {e}")
+        print(f"  Aktuelles         FEHLER: {e}", file=sys.stderr)
+
     daten = {
         "erzeugt": datetime.now(_ZEITZONE).strftime("%d.%m.%Y %H:%M"),
         "fehler": fehler,
         "vorstoesse": vorstoesse,
         "berichte": berichte,
         "beschluesse": beschluesse,
+        "aktuelles": aktuelles,
     }
 
     if UNBEKANNTE_PERSONEN:
@@ -531,12 +766,20 @@ def main():
     js = "window.NEUHAUSEN_DATEN = " + json.dumps(daten, ensure_ascii=False) + ";\n"
     AUSGABE.write_text(js, encoding="utf-8")
 
-    feed = baue_feed(vorstoesse, berichte, beschluesse)
+    feed = baue_feed(vorstoesse, berichte, beschluesse, aktuelles)
     FEED_AUSGABE.write_text(feed, encoding="utf-8")
+
+    if "--ohne-volltext" not in sys.argv:
+        try:
+            baue_volltext(vorstoesse, berichte, beschluesse)
+        except Exception as e:
+            print(f"Volltext-Erfassung fehlgeschlagen: {e}", file=sys.stderr)
+    else:
+        print("Volltext uebersprungen (--ohne-volltext)")
 
     print(f"Geschrieben: {AUSGABE}  "
           f"({len(vorstoesse)} Vorstoesse, {len(berichte)} Berichte, "
-          f"{len(beschluesse)} Beschluesse)")
+          f"{len(beschluesse)} Beschluesse, {len(aktuelles)} Aktuelles)")
     print(f"Geschrieben: {FEED_AUSGABE}")
 
     if fehler and not vorstoesse and not berichte:
