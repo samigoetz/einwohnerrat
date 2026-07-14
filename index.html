@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html lang="de-CH">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Übersicht Einwohnerrat · SP Neuhausen</title>
+<style>
+  :root {
+    --rot: #E2001A;
+    --rot-dunkel: #B80015;
+    --rosa: #F8D2D8;
+    --rosa-mittel: #F09AA8;
+    --schwarz: #1D1D1B;
+    --grau: #6E6E6E;
+    --grau-hell: #F2F2F0;
+    --linie: #DDDDDA;
+    --weiss: #FFFFFF;
+    --gruen: #2E7D46;
+    --gruen-hell: #DDEEDF;
+    --kopf-offset: 52px; /* wird per JS exakt gemessen */
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0; background: var(--weiss); color: var(--schwarz);
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    line-height: 1.5; font-size: 15px;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 0 20px 60px; }
+
+  .kopf { background: var(--rot); color: var(--weiss); padding: 34px 0 26px; }
+  .kopf .wrap { padding-bottom: 0; }
+  .eyebrow {
+    font-size: 12px; font-weight: 700; letter-spacing: 0.18em;
+    text-transform: uppercase; margin: 0 0 8px; opacity: 0.92;
+  }
+  h1 {
+    font-size: clamp(30px, 5.5vw, 48px); font-weight: 800;
+    letter-spacing: -0.015em; line-height: 1.02; margin: 0;
+  }
+  .statuszeile {
+    display: flex; flex-wrap: wrap; align-items: center;
+    gap: 10px 16px; margin-top: 18px; font-size: 12.5px;
+  }
+  .status { flex: 1 1 auto; min-width: 200px; opacity: 0.95; }
+  .dot {
+    display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+    background: rgba(255,255,255,0.5); margin-right: 7px; vertical-align: middle;
+  }
+  .dot.on { background: #fff; }
+  .dot.err { background: var(--schwarz); }
+
+  button {
+    font: inherit; font-weight: 700; font-size: 13px; cursor: pointer;
+    border: 2px solid var(--weiss); background: var(--weiss); color: var(--rot);
+    padding: 8px 18px; border-radius: 0;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    transition: background 0.12s ease, color 0.12s ease;
+  }
+  button:hover { background: transparent; color: var(--weiss); }
+  button:focus-visible { outline: 3px solid var(--schwarz); outline-offset: 2px; }
+  .auto { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; }
+  .auto label { cursor: pointer; user-select: none; }
+  .auto input { accent-color: var(--weiss); width: 15px; height: 15px; }
+
+  .tabs {
+    display: flex; border-bottom: 3px solid var(--schwarz);
+    background: var(--weiss); position: sticky; top: 0; z-index: 20;
+  }
+  .tab {
+    flex: 1 1 auto; background: var(--weiss); color: var(--schwarz);
+    border: none; border-right: 1px solid var(--linie);
+    padding: 15px 10px 13px; font-size: 13.5px; font-weight: 800;
+    text-transform: uppercase; letter-spacing: 0.08em; cursor: pointer;
+    transition: background 0.1s ease, color 0.1s ease;
+  }
+  .tab:last-child { border-right: none; }
+  .tab:hover { background: var(--rosa); color: var(--rot-dunkel); }
+  .tab.aktiv { background: var(--rot); color: var(--weiss); }
+  .tab:focus-visible { outline: 3px solid var(--rot); outline-offset: -3px; }
+  .tab .anzahl { display: inline-block; margin-left: 6px; font-weight: 600; opacity: 0.75; font-size: 11.5px; }
+
+  .panel { display: none; padding-top: 26px; }
+  .panel.aktiv { display: block; }
+  .panel-hinweis { font-size: 13px; color: var(--grau); margin: 0 0 16px; }
+
+  .filter { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; align-items: center; }
+  .chip {
+    font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+    padding: 7px 14px; border: 2px solid var(--schwarz);
+    background: var(--weiss); color: var(--schwarz); cursor: pointer;
+    transition: all 0.1s ease;
+  }
+  .chip:hover { border-color: var(--rot); color: var(--rot); background: var(--weiss); }
+  .chip.aktiv { background: var(--rot); border-color: var(--rot); color: var(--weiss); }
+  .suche {
+    flex: 1 1 200px; min-width: 150px; font: inherit; font-size: 14px;
+    padding: 8px 12px; border: 2px solid var(--schwarz);
+    background: var(--weiss); color: var(--schwarz); border-radius: 0;
+  }
+  .suche:focus-visible { outline: 3px solid var(--rot); outline-offset: 1px; }
+
+  /* Tabellen ohne inneren Scrollbereich: die Seite scrollt als Ganzes,
+     die Spaltenzeile bleibt unter der Tab-Leiste fixiert
+     (Abstand wird per JS exakt gemessen, siehe --kopf-offset). */
+  table.daten {
+    width: 100%; border-collapse: collapse; font-size: 14px;
+    border: 2px solid var(--schwarz);
+  }
+  table.daten thead th {
+    text-align: left; font-size: 11px; letter-spacing: 0.1em;
+    text-transform: uppercase; font-weight: 800;
+    color: var(--weiss); background: var(--schwarz);
+    padding: 11px 13px; cursor: pointer; user-select: none; white-space: nowrap;
+    position: sticky; top: var(--kopf-offset); z-index: 10;
+  }
+  table.daten thead th:hover { background: var(--rot); }
+  table.daten thead th .pfeil { opacity: 0.5; font-size: 9px; margin-left: 4px; }
+  table.daten thead th.sortiert { background: var(--rot); }
+  table.daten thead th.sortiert .pfeil { opacity: 1; }
+  table.daten tbody td { padding: 11px 13px; border-bottom: 1px solid var(--linie); vertical-align: top; }
+  table.daten tbody tr:hover { background: var(--grau-hell); }
+  table.daten tbody tr.neu { background: var(--rosa); }
+  table.daten tbody tr.neu:hover { background: var(--rosa-mittel); }
+
+  td.datum { font-size: 12.5px; color: var(--grau); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  td.person { font-weight: 600; }
+  td.titel a { color: var(--schwarz); text-decoration: none; border-bottom: 1px solid var(--rosa-mittel); font-weight: 500; }
+  td.titel a:hover { color: var(--rot); border-bottom-color: var(--rot); }
+  td.titel .antwort {
+    display: inline-block; margin-left: 8px; font-size: 11px; font-weight: 700;
+    color: var(--rot); text-decoration: none; white-space: nowrap;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  td.titel .antwort:hover { text-decoration: underline; }
+  td.titel .beilagen { margin-top: 5px; display: flex; flex-wrap: wrap; gap: 3px 14px; }
+  td.titel .beilagen a { font-size: 12px; color: var(--rot); text-decoration: none; font-weight: 600; border-bottom: none; }
+  td.titel .beilagen a:hover { text-decoration: underline; }
+
+  .art {
+    display: inline-block; font-size: 10px; font-weight: 800;
+    letter-spacing: 0.07em; text-transform: uppercase;
+    padding: 4px 8px; white-space: nowrap;
+    border: 1.5px solid var(--schwarz); color: var(--schwarz);
+  }
+  .frak-badge {
+    display: inline-block; font-size: 11px; font-weight: 700;
+    padding: 3px 9px; background: var(--grau-hell); color: var(--schwarz);
+    margin: 0 4px 4px 0; white-space: nowrap;
+  }
+  .frak-badge.unbekannt { color: var(--grau); font-style: italic; }
+  .marke-neu {
+    display: inline-block; font-size: 9.5px; font-weight: 800;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    background: var(--rot); color: var(--weiss); padding: 3px 7px; margin-right: 7px;
+  }
+  .status-badge {
+    display: inline-block; font-size: 10.5px; font-weight: 800;
+    letter-spacing: 0.05em; text-transform: uppercase;
+    padding: 4px 10px; white-space: nowrap;
+  }
+  .status-badge.pendent { background: var(--rot); color: var(--weiss); }
+  .status-badge.erledigt { background: var(--gruen-hell); color: var(--gruen); }
+  .status-badge.zurueck { background: var(--grau-hell); color: var(--grau); }
+  .status-badge.andere { background: var(--grau-hell); color: var(--grau); }
+
+  /* Statistik */
+  .stat-block { margin-bottom: 44px; }
+  .stat-block h2 {
+    font-size: 20px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.03em; margin: 0 0 4px;
+    border-bottom: 3px solid var(--rot); display: inline-block; padding-bottom: 3px;
+  }
+  .stat-block .untertitel { font-size: 13px; color: var(--grau); margin: 6px 0 18px; }
+
+  .pend-kopf { display: flex; flex-wrap: wrap; gap: 26px; align-items: center; margin-bottom: 24px; }
+  .kpi-reihe { display: flex; flex-wrap: wrap; gap: 14px; }
+  .kpi { background: var(--rot); color: var(--weiss); padding: 16px 22px; min-width: 140px; }
+  .kpi .zahl { font-size: 40px; font-weight: 800; line-height: 1; }
+  .kpi .text { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; margin-top: 5px; }
+  .kpi.grau { background: var(--schwarz); }
+
+  .donut-box { display: flex; align-items: center; gap: 18px; }
+  .donut { width: 150px; height: 150px; border-radius: 50%; position: relative; flex: none; }
+  .donut::after { content: ""; position: absolute; inset: 26px; background: var(--weiss); border-radius: 50%; }
+  .donut .mitte {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; z-index: 1;
+  }
+  .donut .mitte .p { font-size: 26px; font-weight: 800; color: var(--rot); line-height: 1; }
+  .donut .mitte .t { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--grau); margin-top: 3px; }
+  .donut-legende { font-size: 12.5px; font-weight: 600; display: flex; flex-direction: column; gap: 7px; }
+  .donut-legende span { display: inline-flex; align-items: center; gap: 7px; }
+  .donut-legende i { display: inline-block; width: 13px; height: 13px; flex: none; }
+  .f-pendent { background: var(--rot); }
+  .f-erledigt { background: var(--gruen); }
+  .f-zurueck { background: #B5B5B2; }
+
+  .pend-titelzeile {
+    font-size: 12px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--grau); margin: 0 0 10px;
+  }
+  .pend-zeile {
+    display: grid; grid-template-columns: 82px minmax(220px, 1fr) minmax(120px, 240px) 76px;
+    gap: 12px; align-items: center; padding: 8px 0;
+    border-bottom: 1px solid var(--linie);
+  }
+  .pend-zeile .datum { font-size: 12px; color: var(--grau); font-variant-numeric: tabular-nums; }
+  .pend-zeile a { color: var(--schwarz); text-decoration: none; font-weight: 600; font-size: 13.5px; border-bottom: 1px solid var(--rosa-mittel); }
+  .pend-zeile a:hover { color: var(--rot); border-bottom-color: var(--rot); }
+  .pend-zeile .balken { height: 16px; background: var(--grau-hell); }
+  .pend-zeile .balken > div { height: 100%; background: var(--rot); }
+  .pend-zeile .tage { font-size: 12.5px; font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  .legende { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 0 0 14px; font-size: 12px; font-weight: 600; }
+  .legende span { display: inline-flex; align-items: center; gap: 6px; }
+  .legende i { display: inline-block; width: 13px; height: 13px; }
+  .farb-ka { background: var(--rot); }
+  .farb-ip { background: var(--schwarz); }
+  .farb-po { background: var(--rosa-mittel); }
+  .farb-mo { background: #9C9C9A; }
+
+  .balken-zeile { display: grid; grid-template-columns: 120px 1fr 54px; gap: 12px; align-items: center; margin-bottom: 9px; }
+  .balken-label { font-size: 13px; font-weight: 700; text-align: right; }
+  .balken-h { display: flex; height: 26px; }
+  .balken-h .seg { height: 100%; }
+  .balken-total { font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; }
+
+  .jahr-chart { display: flex; align-items: flex-end; gap: 5px; height: 190px; margin-top: 8px; }
+  .jahr-saeule { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; height: 100%; justify-content: flex-end; }
+  .jahr-saeule .wert { font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .jahr-saeule .stab { width: 100%; background: var(--rosa-mittel); }
+  .jahr-saeule.aktiv .stab { background: var(--rot); }
+  .jahr-saeule .lab { font-size: 10px; color: var(--grau); font-weight: 700; transform: rotate(-45deg); transform-origin: center; margin-top: 6px; }
+
+  .leer, .fehler { font-size: 14px; color: var(--grau); padding: 20px 14px; }
+  .fehler {
+    background: var(--rosa); border-left: 4px solid var(--rot);
+    color: var(--rot-dunkel); font-weight: 600; margin-bottom: 10px;
+  }
+
+  footer {
+    margin-top: 50px; padding-top: 18px; border-top: 3px solid var(--schwarz);
+    font-size: 12px; color: var(--grau); line-height: 1.65;
+  }
+  footer b { color: var(--schwarz); }
+  footer code { background: var(--grau-hell); padding: 1px 5px; font-size: 11px; }
+  .reset {
+    background: none; border: none; color: var(--rot); padding: 0;
+    font-size: inherit; font-weight: 600; text-decoration: underline;
+    cursor: pointer; text-transform: none; letter-spacing: 0;
+  }
+  .reset:hover { background: none; color: var(--rot-dunkel); }
+
+  @media (max-width: 680px) {
+    .pend-zeile { grid-template-columns: 74px 1fr 64px; }
+    .pend-zeile .balken { display: none; }
+    .balken-zeile { grid-template-columns: 92px 1fr 44px; gap: 8px; }
+    .balken-label { font-size: 11.5px; }
+    .tab { font-size: 11px; letter-spacing: 0.04em; padding: 13px 6px 11px; }
+    .jahr-chart { height: 150px; }
+    td.person { white-space: normal; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="kopf">
+  <div class="wrap">
+    <p class="eyebrow">by SP Neuhausen</p>
+    <h1>Übersicht Einwohnerrat</h1>
+    <div class="statuszeile">
+      <div class="status">
+        <span class="dot" id="dot"></span><span id="statustext">Lade Daten …</span>
+      </div>
+      <div class="auto">
+        <input type="checkbox" id="autochk">
+        <label for="autochk">Auto (10 Min.)</label>
+      </div>
+      <button id="pruefen">Aktualisieren</button>
+    </div>
+  </div>
+</div>
+
+<nav class="tabs" id="tabs" aria-label="Bereiche">
+  <button class="tab aktiv" data-panel="vorstoesse">Vorstösse<span class="anzahl" id="tabzahl-v"></span></button>
+  <button class="tab" data-panel="berichte">Berichte &amp; Anträge<span class="anzahl" id="tabzahl-b"></span></button>
+  <button class="tab" data-panel="statistik">Statistik</button>
+</nav>
+
+<div class="wrap">
+
+  <!-- TAB: VORSTÖSSE -->
+  <section class="panel aktiv" id="panel-vorstoesse">
+    <p class="panel-hinweis">Kleine Anfragen, Interpellationen, Postulate und Motionen. Neueste zuoberst.</p>
+    <div class="filter" id="filter">
+      <button class="chip aktiv" data-art="alle">Alle</button>
+      <button class="chip" data-art="Kleine Anfrage">Kleine Anfragen</button>
+      <button class="chip" data-art="Interpellation">Interpellationen</button>
+      <button class="chip" data-art="Postulat">Postulate</button>
+      <button class="chip" data-art="Motion">Motionen</button>
+      <input type="text" class="suche" id="suche" placeholder="Suche Person, Fraktion oder Titel …">
+    </div>
+    <table class="daten" id="tabelle-vorstoesse">
+      <thead>
+        <tr>
+          <th data-sort="datum" class="sortiert">Datum<span class="pfeil">▼</span></th>
+          <th data-sort="titel">Titel<span class="pfeil"></span></th>
+          <th data-sort="art">Art<span class="pfeil"></span></th>
+          <th data-sort="person">Person<span class="pfeil"></span></th>
+          <th data-sort="fraktion">Fraktion<span class="pfeil"></span></th>
+          <th data-sort="status">Status<span class="pfeil"></span></th>
+        </tr>
+      </thead>
+      <tbody id="vorstoss-body">
+        <tr><td colspan="6" class="leer">Wird geladen …</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- TAB: BERICHTE & ANTRÄGE -->
+  <section class="panel" id="panel-berichte">
+    <p class="panel-hinweis">Vollständige Liste, neueste zuoberst.</p>
+    <div class="filter">
+      <input type="text" class="suche" id="ba-suche" placeholder="Suche Titel, Beilage oder Art …">
+    </div>
+    <table class="daten" id="tabelle-berichte">
+      <thead>
+        <tr>
+          <th data-sort="datum" class="sortiert">Datum<span class="pfeil">▼</span></th>
+          <th data-sort="titel">Titel<span class="pfeil"></span></th>
+          <th data-sort="art">Art<span class="pfeil"></span></th>
+          <th data-sort="status">Status<span class="pfeil"></span></th>
+        </tr>
+      </thead>
+      <tbody id="ba-body">
+        <tr><td colspan="4" class="leer">Wird geladen …</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- TAB: STATISTIK -->
+  <section class="panel" id="panel-statistik">
+    <div class="filter" id="jahr-filter"></div>
+    <div id="stat-bereich"><p class="leer">Wird geladen …</p></div>
+  </section>
+
+  <footer>
+    <p>
+      Die Daten stammen von neuhausen.ch und werden vom Skript
+      <code>neuhausen_daten.py</code> aufbereitet: online automatisch stündlich
+      (GitHub Actions), lokal per Terminal-Lauf. <b>Neu hinzugekommene Einträge</b>
+      werden in diesem Browser rot hervorgehoben; beim allerersten Laden gilt alles
+      als bekannt. Fraktionszuordnungen pflegst du in der Liste
+      <code>FRAKTIONEN</code> im Skript.
+    </p>
+    <p>Neu aufsetzen? <button class="reset" id="reset">Gespeicherten Stand löschen</button></p>
+  </footer>
+
+</div>
+
+<script src="neuhausen_daten.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  var SPEICHER_KEY = "neuhausen_monitor_stand_v2";
+  var AUTO_KEY = "neuhausen_monitor_auto_v2";
+  var AUTO_INTERVALL = 10 * 60 * 1000;
+  var autoTimer = null;
+
+  var vorstoesse = [];
+  var baEintraege = [];
+  var aktiverFilter = "alle";
+  var suchText = "";
+  var baSuchText = "";
+  var vSort = { feld: "datum", richtung: -1 };
+  var bSort = { feld: "datum", richtung: -1 };
+  var jahrFilter = "alle";
+
+  var ART_FARBEN = { ka: "farb-ka", ip: "farb-ip", po: "farb-po", mo: "farb-mo" };
+  var ART_NAMEN = { ka: "Kleine Anfragen", ip: "Interpellationen", po: "Postulate", mo: "Motionen" };
+
+  // Parteifarben in Anlehnung an das nationale Parlament
+  var FRAK_FARBEN = {
+    "SP":          ["#E2001A", "#FFFFFF"],
+    "SVP":         ["#00823D", "#FFFFFF"],
+    "FDP":         ["#1352A0", "#FFFFFF"],
+    "Die Mitte":   ["#F08000", "#FFFFFF"],
+    "GLP":         ["#A8C227", "#1D1D1B"],
+    "Grüne":       ["#84B414", "#1D1D1B"],
+    "EDU":         ["#8B6F4E", "#FFFFFF"],
+    "AL":          ["#A31515", "#FFFFFF"],
+    "ÖBS":         ["#2F8F7A", "#FFFFFF"],
+    "parteilos":   ["#6E6E6E", "#FFFFFF"],
+    "GPK":         ["#1D1D1B", "#FFFFFF"],
+    "Volksmotion": ["#555555", "#FFFFFF"]
+  };
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  // Tab-Leisten-Hoehe exakt messen, damit die fixierte Spaltenzeile
+  // buendig darunter sitzt und keine Zeile dahinter verschwinden kann.
+  function messeKopfOffset() {
+    var h = $("tabs").offsetHeight;
+    document.documentElement.style.setProperty("--kopf-offset", h + "px");
+  }
+  window.addEventListener("resize", messeKopfOffset);
+
+  function ladeStand() {
+    try { return JSON.parse(localStorage.getItem(SPEICHER_KEY)) || {}; }
+    catch (e) { return {}; }
+  }
+  function speichereStand(s) { localStorage.setItem(SPEICHER_KEY, JSON.stringify(s)); }
+  function setStatus(text, zustand) {
+    $("statustext").textContent = text;
+    $("dot").className = "dot" + (zustand ? " " + zustand : "");
+  }
+  function datumZahl(d) {
+    var m = d.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+    return m ? parseInt(m[3] + m[2] + m[1], 10) : 0;
+  }
+  function tageSeit(d) {
+    var m = d.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+    if (!m) return 0;
+    var dt = new Date(parseInt(m[3], 10), parseInt(m[2], 10) - 1, parseInt(m[1], 10));
+    return Math.max(0, Math.floor((Date.now() - dt.getTime()) / 86400000));
+  }
+  function jahrVon(d) { return d.slice(-4); }
+  function statusKlasse(s) {
+    var t = (s || "").toLowerCase();
+    if (t.indexOf("pendent") >= 0) return "pendent";
+    if (t.indexOf("erledigt") >= 0) return "erledigt";
+    if (t.indexOf("zur\u00fcck") >= 0 || t.indexOf("zurueck") >= 0) return "zurueck";
+    return "andere";
+  }
+  function frakText(v) {
+    return (v.fraktionen && v.fraktionen.length) ? v.fraktionen.join(", ") : "Unbekannt";
+  }
+
+  // ---- Rendering: Vorstoesse ------------------------------------------------
+  function rendereVorstoesse() {
+    var body = $("vorstoss-body");
+    body.innerHTML = "";
+
+    var gefiltert = vorstoesse.filter(function (v) {
+      if (aktiverFilter !== "alle" && v.art !== aktiverFilter) return false;
+      if (suchText) {
+        var hay = (v.person + " " + v.titel + " " + v.nummer + " " + frakText(v)).toLowerCase();
+        if (hay.indexOf(suchText) < 0) return false;
+      }
+      return true;
+    });
+
+    gefiltert.sort(function (a, b) {
+      var f = vSort.feld, av, bv;
+      if (f === "datum") { av = a.datumZ; bv = b.datumZ; }
+      else if (f === "fraktion") { av = frakText(a).toLowerCase(); bv = frakText(b).toLowerCase(); }
+      else { av = (a[f] || "").toLowerCase(); bv = (b[f] || "").toLowerCase(); }
+      if (av < bv) return -1 * vSort.richtung;
+      if (av > bv) return 1 * vSort.richtung;
+      return b.datumZ - a.datumZ;
+    });
+
+    if (!gefiltert.length) {
+      body.innerHTML = '<tr><td colspan="6" class="leer">Keine Eintr\u00e4ge f\u00fcr diese Auswahl.</td></tr>';
+    } else {
+      gefiltert.forEach(function (v) {
+        var tr = document.createElement("tr");
+        if (v._neu) tr.className = "neu";
+
+        var tdD = document.createElement("td");
+        tdD.className = "datum"; tdD.textContent = v.datum;
+        tr.appendChild(tdD);
+
+        var tdT = document.createElement("td");
+        tdT.className = "titel";
+        if (v._neu) {
+          var mm = document.createElement("span");
+          mm.className = "marke-neu"; mm.textContent = "Neu";
+          tdT.appendChild(mm);
+        }
+        var a = document.createElement("a");
+        a.href = v.url; a.target = "_blank"; a.rel = "noopener";
+        a.textContent = v.titel + (v.nummer ? " (" + v.nummer + ")" : "");
+        tdT.appendChild(a);
+        if (v.antwortUrl) {
+          var ant = document.createElement("a");
+          ant.className = "antwort"; ant.href = v.antwortUrl;
+          ant.target = "_blank"; ant.rel = "noopener";
+          ant.textContent = "\u21b3 Antwort";
+          tdT.appendChild(ant);
+        }
+        tr.appendChild(tdT);
+
+        var tdA = document.createElement("td");
+        var art = document.createElement("span");
+        art.className = "art"; art.textContent = v.art;
+        tdA.appendChild(art);
+        tr.appendChild(tdA);
+
+        var tdP = document.createElement("td");
+        tdP.className = "person"; tdP.textContent = v.person;
+        tr.appendChild(tdP);
+
+        var tdF = document.createElement("td");
+        tdF.className = "fraktion";
+        (v.fraktionen && v.fraktionen.length ? v.fraktionen : ["Unbekannt"]).forEach(function (f) {
+          var b = document.createElement("span");
+          b.className = "frak-badge" + (f === "Unbekannt" ? " unbekannt" : "");
+          b.textContent = f;
+          var farbe = FRAK_FARBEN[f];
+          if (farbe) {
+            b.style.background = farbe[0];
+            b.style.color = farbe[1];
+          }
+          tdF.appendChild(b);
+        });
+        tr.appendChild(tdF);
+
+        var tdS = document.createElement("td");
+        var badge = document.createElement("span");
+        badge.className = "status-badge " + statusKlasse(v.status);
+        badge.textContent = v.status || "\u2013";
+        tdS.appendChild(badge);
+        tr.appendChild(tdS);
+
+        body.appendChild(tr);
+      });
+    }
+
+    var neu = vorstoesse.filter(function (v) { return v._neu; }).length;
+    $("tabzahl-v").textContent = "(" + vorstoesse.length + (neu ? " \u00b7 " + neu + " neu" : "") + ")";
+  }
+
+  // ---- Rendering: Berichte & Antraege ----------------------------------------
+  function rendereBA() {
+    var body = $("ba-body");
+    body.innerHTML = "";
+
+    var liste = baEintraege.filter(function (e) {
+      if (!baSuchText) return true;
+      var hay = (e.haupt.titel + " " + (e.art || "") + " " +
+        (e.beilagen || []).map(function (b) { return b.titel; }).join(" ")).toLowerCase();
+      return hay.indexOf(baSuchText) >= 0;
+    });
+
+    liste.sort(function (a, b) {
+      var f = bSort.feld, av, bv;
+      if (f === "datum") { av = a.datumZ; bv = b.datumZ; }
+      else if (f === "titel") { av = a.haupt.titel.toLowerCase(); bv = b.haupt.titel.toLowerCase(); }
+      else { av = (a[f] || "").toLowerCase(); bv = (b[f] || "").toLowerCase(); }
+      if (av < bv) return -1 * bSort.richtung;
+      if (av > bv) return 1 * bSort.richtung;
+      return b.datumZ - a.datumZ;
+    });
+
+    if (!liste.length) {
+      body.innerHTML = '<tr><td colspan="4" class="leer">Keine Eintr\u00e4ge f\u00fcr diese Auswahl.</td></tr>';
+    } else {
+      liste.forEach(function (e) {
+        var tr = document.createElement("tr");
+        if (e._neu) tr.className = "neu";
+
+        var tdD = document.createElement("td");
+        tdD.className = "datum"; tdD.textContent = e.datum;
+        tr.appendChild(tdD);
+
+        var tdT = document.createElement("td");
+        tdT.className = "titel";
+        if (e._neu) {
+          var mm = document.createElement("span");
+          mm.className = "marke-neu"; mm.textContent = "Neu";
+          tdT.appendChild(mm);
+        }
+        var a = document.createElement("a");
+        a.href = e.haupt.url; a.target = "_blank"; a.rel = "noopener";
+        a.textContent = e.haupt.titel;
+        tdT.appendChild(a);
+        if (e.beilagen && e.beilagen.length) {
+          var bl = document.createElement("div");
+          bl.className = "beilagen";
+          e.beilagen.forEach(function (b) {
+            var ba = document.createElement("a");
+            ba.href = b.url; ba.target = "_blank"; ba.rel = "noopener";
+            ba.textContent = "+ " + b.titel;
+            bl.appendChild(ba);
+          });
+          tdT.appendChild(bl);
+        }
+        tr.appendChild(tdT);
+
+        var tdA = document.createElement("td");
+        tdA.textContent = e.art || "\u2013";
+        tdA.style.fontSize = "12.5px";
+        tr.appendChild(tdA);
+
+        var tdS = document.createElement("td");
+        var badge = document.createElement("span");
+        badge.className = "status-badge " + statusKlasse(e.status);
+        badge.textContent = e.status || "\u2013";
+        tdS.appendChild(badge);
+        tr.appendChild(tdS);
+
+        body.appendChild(tr);
+      });
+    }
+    $("tabzahl-b").textContent = "(" + baEintraege.length + ")";
+  }
+
+  // ---- Rendering: Statistik ----------------------------------------------------
+  function rendereJahrFilter() {
+    var box = $("jahr-filter");
+    box.innerHTML = "";
+    var jahre = {};
+    vorstoesse.forEach(function (v) { jahre[jahrVon(v.datum)] = true; });
+    var liste = Object.keys(jahre).sort().reverse();
+
+    function chip(text, wert) {
+      var b = document.createElement("button");
+      b.className = "chip" + (jahrFilter === wert ? " aktiv" : "");
+      b.textContent = text;
+      b.addEventListener("click", function () {
+        jahrFilter = wert; rendereJahrFilter(); rendereStatistik();
+      });
+      return b;
+    }
+    box.appendChild(chip("Alle Jahre", "alle"));
+    liste.forEach(function (j) { box.appendChild(chip(j, j)); });
+  }
+
+  function rendereStatistik() {
+    var bereich = $("stat-bereich");
+    bereich.innerHTML = "";
+
+    var daten = vorstoesse.filter(function (v) {
+      return jahrFilter === "alle" || jahrVon(v.datum) === jahrFilter;
+    });
+    if (!daten.length) {
+      bereich.innerHTML = '<p class="leer">Keine Vorst\u00f6sse f\u00fcr diese Auswahl.</p>';
+      return;
+    }
+    var zeitraumText = (jahrFilter === "alle" ? "Alle Jahre" : "Jahr " + jahrFilter);
+
+    // === Block 1: Pendente Vorstoesse ===
+    var b1 = document.createElement("div");
+    b1.className = "stat-block";
+    b1.innerHTML = '<h2>Pendente Vorst\u00f6sse</h2>' +
+      '<p class="untertitel">' + zeitraumText + '</p>';
+
+    var nPend = 0, nErl = 0, nZur = 0;
+    daten.forEach(function (v) {
+      var k = statusKlasse(v.status);
+      if (k === "pendent") nPend++;
+      else if (k === "erledigt") nErl++;
+      else nZur++;
+    });
+    var total = daten.length;
+    var pPend = nPend / total * 100;
+    var pErl = nErl / total * 100;
+
+    var kopfzeile = document.createElement("div");
+    kopfzeile.className = "pend-kopf";
+    var kpis = document.createElement("div");
+    kpis.className = "kpi-reihe";
+    kpis.innerHTML =
+      '<div class="kpi"><div class="zahl">' + nPend + '</div><div class="text">pendent</div></div>' +
+      '<div class="kpi grau"><div class="zahl">' + total + '</div><div class="text">Vorst\u00f6sse total</div></div>';
+    kopfzeile.appendChild(kpis);
+
+    var donutBox = document.createElement("div");
+    donutBox.className = "donut-box";
+    var donut = document.createElement("div");
+    donut.className = "donut";
+    donut.style.background = "conic-gradient(" +
+      "var(--rot) 0% " + pPend.toFixed(2) + "%, " +
+      "var(--gruen) " + pPend.toFixed(2) + "% " + (pPend + pErl).toFixed(2) + "%, " +
+      "#B5B5B2 " + (pPend + pErl).toFixed(2) + "% 100%)";
+    donut.innerHTML = '<div class="mitte"><div class="p">' + Math.round(pPend) +
+      '%</div><div class="t">pendent</div></div>';
+    donutBox.appendChild(donut);
+    var leg = document.createElement("div");
+    leg.className = "donut-legende";
+    leg.innerHTML =
+      '<span><i class="f-pendent"></i>Pendent (' + nPend + ')</span>' +
+      '<span><i class="f-erledigt"></i>Erledigt (' + nErl + ')</span>' +
+      '<span><i class="f-zurueck"></i>Zur\u00fcckgezogen / andere (' + nZur + ')</span>';
+    donutBox.appendChild(leg);
+    kopfzeile.appendChild(donutBox);
+    b1.appendChild(kopfzeile);
+
+    var pendListe = daten.filter(function (v) { return statusKlasse(v.status) === "pendent"; });
+    pendListe.forEach(function (v) { v._tage = tageSeit(v.datum); });
+    pendListe.sort(function (a, b) { return b._tage - a._tage; });
+
+    if (pendListe.length) {
+      var pt = document.createElement("p");
+      pt.className = "pend-titelzeile";
+      pt.textContent = "Pendent seit \u2013 l\u00e4ngste zuoberst";
+      b1.appendChild(pt);
+      var maxTage = pendListe[0]._tage || 1;
+      pendListe.forEach(function (v) {
+        var z = document.createElement("div");
+        z.className = "pend-zeile";
+        var d = document.createElement("div");
+        d.className = "datum"; d.textContent = v.datum;
+        z.appendChild(d);
+        var t = document.createElement("div");
+        var a = document.createElement("a");
+        a.href = v.url; a.target = "_blank"; a.rel = "noopener";
+        a.textContent = v.titel + (v.nummer ? " (" + v.nummer + ")" : "");
+        t.appendChild(a);
+        z.appendChild(t);
+        var bal = document.createElement("div");
+        bal.className = "balken";
+        var fuell = document.createElement("div");
+        fuell.style.width = Math.max(2, v._tage / maxTage * 100) + "%";
+        bal.appendChild(fuell);
+        z.appendChild(bal);
+        var tg = document.createElement("div");
+        tg.className = "tage"; tg.textContent = v._tage + " Tage";
+        z.appendChild(tg);
+        b1.appendChild(z);
+      });
+    } else {
+      var keine = document.createElement("p");
+      keine.className = "leer";
+      keine.textContent = "Keine pendenten Vorst\u00f6sse in dieser Auswahl.";
+      b1.appendChild(keine);
+    }
+    bereich.appendChild(b1);
+
+    // === Block 2: Vorstoesse nach Fraktion ===
+    var b2 = document.createElement("div");
+    b2.className = "stat-block";
+    b2.innerHTML = '<h2>Vorst\u00f6sse nach Fraktion</h2>' +
+      '<p class="untertitel">' + zeitraumText +
+      ' \u00b7 Gemeinsam eingereichte Vorst\u00f6sse z\u00e4hlen f\u00fcr jede beteiligte Fraktion</p>';
+
+    var legende = document.createElement("div");
+    legende.className = "legende";
+    ["ka", "ip", "po", "mo"].forEach(function (k) {
+      var s = document.createElement("span");
+      s.innerHTML = '<i class="' + ART_FARBEN[k] + '"></i>' + ART_NAMEN[k];
+      legende.appendChild(s);
+    });
+    b2.appendChild(legende);
+
+    var proFraktion = {};
+    daten.forEach(function (v) {
+      var fs = (v.fraktionen && v.fraktionen.length) ? v.fraktionen : ["Unbekannt"];
+      fs.forEach(function (f) {
+        if (!proFraktion[f]) proFraktion[f] = { ka: 0, ip: 0, po: 0, mo: 0, total: 0 };
+        proFraktion[f][v.kuerzel] += 1;
+        proFraktion[f].total += 1;
+      });
+    });
+    var fraktionen = Object.keys(proFraktion).sort(function (a, b) {
+      if (a === "Unbekannt") return 1;
+      if (b === "Unbekannt") return -1;
+      return proFraktion[b].total - proFraktion[a].total;
+    });
+    var maxTotal = 0;
+    fraktionen.forEach(function (f) { if (proFraktion[f].total > maxTotal) maxTotal = proFraktion[f].total; });
+
+    fraktionen.forEach(function (f) {
+      var d = proFraktion[f];
+      var z = document.createElement("div");
+      z.className = "balken-zeile";
+      var lab = document.createElement("div");
+      lab.className = "balken-label"; lab.textContent = f;
+      z.appendChild(lab);
+      var bal = document.createElement("div");
+      bal.className = "balken-h";
+      ["ka", "ip", "po", "mo"].forEach(function (k) {
+        if (!d[k]) return;
+        var seg = document.createElement("div");
+        seg.className = "seg " + ART_FARBEN[k];
+        seg.style.width = (d[k] / maxTotal * 100) + "%";
+        seg.title = f + ": " + d[k] + " " + ART_NAMEN[k];
+        bal.appendChild(seg);
+      });
+      z.appendChild(bal);
+      var tot = document.createElement("div");
+      tot.className = "balken-total"; tot.textContent = d.total;
+      z.appendChild(tot);
+      b2.appendChild(z);
+    });
+    bereich.appendChild(b2);
+
+    // === Block 3: Eingereichte Vorstoesse pro Jahr ===
+    var b3 = document.createElement("div");
+    b3.className = "stat-block";
+    b3.innerHTML = '<h2>Eingereichte Vorst\u00f6sse pro Jahr</h2>' +
+      '<p class="untertitel">Alle Vorstossarten' +
+      (jahrFilter !== "alle" ? " \u00b7 gew\u00e4hltes Jahr hervorgehoben" : "") + '</p>';
+
+    var proJahr = {};
+    vorstoesse.forEach(function (v) {
+      var j = jahrVon(v.datum);
+      proJahr[j] = (proJahr[j] || 0) + 1;
+    });
+    var jahre = Object.keys(proJahr).sort();
+    var maxJ = 0;
+    jahre.forEach(function (j) { if (proJahr[j] > maxJ) maxJ = proJahr[j]; });
+
+    var chart = document.createElement("div");
+    chart.className = "jahr-chart";
+    jahre.forEach(function (j) {
+      var s = document.createElement("div");
+      s.className = "jahr-saeule" + (jahrFilter === j ? " aktiv" : "");
+      var w = document.createElement("div");
+      w.className = "wert"; w.textContent = proJahr[j];
+      s.appendChild(w);
+      var stab = document.createElement("div");
+      stab.className = "stab";
+      stab.style.height = Math.max(3, proJahr[j] / maxJ * 130) + "px";
+      stab.title = j + ": " + proJahr[j] + " Vorst\u00f6sse";
+      s.appendChild(stab);
+      var lab = document.createElement("div");
+      lab.className = "lab"; lab.textContent = j;
+      s.appendChild(lab);
+      chart.appendChild(s);
+    });
+    b3.appendChild(chart);
+    bereich.appendChild(b3);
+  }
+
+  // ---- Datenverarbeitung ----------------------------------------------------------
+  function verarbeite(d) {
+    var stand = ladeStand();
+    var ersterLauf = Object.keys(stand).length === 0;
+    var bekannt = stand.bekannt || {};
+    var neueGesamt = 0;
+
+    vorstoesse = [];
+    baEintraege = [];
+
+    (d.vorstoesse || []).forEach(function (v) {
+      v.datumZ = datumZahl(v.datum);
+      v._neu = !ersterLauf && !bekannt[v.schluessel];
+      if (v._neu) neueGesamt++;
+      bekannt[v.schluessel] = 1;
+      vorstoesse.push(v);
+    });
+    (d.berichte || []).forEach(function (e) {
+      e.datumZ = datumZahl(e.datum);
+      e._neu = !ersterLauf && !bekannt[e.schluessel];
+      if (e._neu) neueGesamt++;
+      bekannt[e.schluessel] = 1;
+      baEintraege.push(e);
+    });
+
+    stand.bekannt = bekannt;
+    speichereStand(stand);
+    rendereVorstoesse();
+    rendereBA();
+    rendereJahrFilter();
+    rendereStatistik();
+
+    var basis = "Datenstand " + (d.erzeugt || "?");
+    var teilfehler = (d.fehler && d.fehler.length) ? " \u00b7 Teilfehler: " + d.fehler.join(", ") : "";
+    if (ersterLauf) {
+      setStatus(basis + " \u00b7 Ausgangsstand gespeichert" + teilfehler, "on");
+    } else if (neueGesamt) {
+      setStatus(neueGesamt + " neu \u00b7 " + basis + teilfehler, "on");
+      benachrichtige(neueGesamt);
+    } else {
+      setStatus("Nichts Neues \u00b7 " + basis + teilfehler, teilfehler ? "err" : "on");
+    }
+  }
+
+  function starte() {
+    messeKopfOffset();
+    if (window.NEUHAUSEN_DATEN) {
+      verarbeite(window.NEUHAUSEN_DATEN);
+    } else {
+      setStatus("Noch keine Daten vorhanden \u2013 bitte die Aktualisierung einmal laufen lassen.", "err");
+      $("vorstoss-body").innerHTML =
+        '<tr><td colspan="6" class="leer">Keine Daten. Auf GitHub: Actions \u2192 \u00abDaten aktualisieren\u00bb \u2192 Run workflow. Lokal: <code>python3 neuhausen_daten.py</code> ausf\u00fchren.</td></tr>';
+      $("ba-body").innerHTML =
+        '<tr><td colspan="4" class="leer">Keine Daten.</td></tr>';
+      $("stat-bereich").innerHTML = '<p class="leer">Keine Daten.</p>';
+    }
+  }
+
+  function benachrichtige(anzahl) {
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    try {
+      new Notification("SP Neuhausen \u00b7 Einwohnerrat",
+        { body: anzahl + " neue Eintr\u00e4ge auf neuhausen.ch" });
+    } catch (e) {}
+  }
+  function frageBenachrichtigung() {
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  }
+  function setzeAuto(an) {
+    localStorage.setItem(AUTO_KEY, an ? "1" : "0");
+    if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+    if (an) {
+      frageBenachrichtigung();
+      autoTimer = setInterval(function () { location.reload(); }, AUTO_INTERVALL);
+    }
+  }
+
+  // ---- Verdrahtung -------------------------------------------------------------------
+  document.querySelectorAll(".tab").forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      document.querySelectorAll(".tab").forEach(function (t) { t.classList.remove("aktiv"); });
+      document.querySelectorAll(".panel").forEach(function (p) { p.classList.remove("aktiv"); });
+      tab.classList.add("aktiv");
+      $("panel-" + tab.getAttribute("data-panel")).classList.add("aktiv");
+      window.scrollTo(0, 0);
+    });
+  });
+
+  $("pruefen").addEventListener("click", function () { location.reload(); });
+  $("autochk").addEventListener("change", function () { setzeAuto(this.checked); });
+
+  $("filter").addEventListener("click", function (e) {
+    var chip = e.target.closest(".chip");
+    if (!chip) return;
+    aktiverFilter = chip.getAttribute("data-art");
+    this.querySelectorAll(".chip").forEach(function (c) {
+      c.classList.toggle("aktiv", c === chip);
+    });
+    rendereVorstoesse();
+  });
+
+  $("suche").addEventListener("input", function () {
+    suchText = this.value.toLowerCase().trim();
+    rendereVorstoesse();
+  });
+  $("ba-suche").addEventListener("input", function () {
+    baSuchText = this.value.toLowerCase().trim();
+    rendereBA();
+  });
+
+  function sortierungVerdrahten(tabelleId, sortObjekt, renderFn) {
+    document.querySelectorAll("#" + tabelleId + " thead th").forEach(function (th) {
+      th.addEventListener("click", function () {
+        var feld = th.getAttribute("data-sort");
+        if (sortObjekt.feld === feld) { sortObjekt.richtung *= -1; }
+        else { sortObjekt.feld = feld; sortObjekt.richtung = (feld === "datum") ? -1 : 1; }
+        document.querySelectorAll("#" + tabelleId + " thead th").forEach(function (h) {
+          h.classList.remove("sortiert");
+          var p = h.querySelector(".pfeil"); if (p) p.textContent = "";
+        });
+        th.classList.add("sortiert");
+        var pfeil = th.querySelector(".pfeil");
+        if (pfeil) pfeil.textContent = sortObjekt.richtung < 0 ? "\u25bc" : "\u25b2";
+        renderFn();
+      });
+    });
+  }
+  sortierungVerdrahten("tabelle-vorstoesse", vSort, rendereVorstoesse);
+  sortierungVerdrahten("tabelle-berichte", bSort, rendereBA);
+
+  $("reset").addEventListener("click", function () {
+    if (confirm("Gespeicherten Stand l\u00f6schen? Beim n\u00e4chsten Laden gilt wieder alles als bekannt.")) {
+      localStorage.removeItem(SPEICHER_KEY);
+      setStatus("Stand gel\u00f6scht. Seite neu laden zum Neuaufsetzen.", null);
+    }
+  });
+
+  var autoAn = localStorage.getItem(AUTO_KEY) === "1";
+  $("autochk").checked = autoAn;
+  if (autoAn) setzeAuto(true);
+
+  starte();
+})();
+</script>
+</body>
+</html>
