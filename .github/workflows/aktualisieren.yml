@@ -1,0 +1,35 @@
+name: Daten aktualisieren
+
+on:
+  schedule:
+    - cron: "17 * * * *"   # jede Stunde zur Minute 17
+  workflow_dispatch:        # erlaubt manuelles Starten per Knopf
+
+permissions:
+  contents: write
+
+jobs:
+  aktualisieren:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Repository holen
+        uses: actions/checkout@v4
+
+      - name: Python einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Abhaengigkeiten installieren
+        run: pip install requests beautifulsoup4
+
+      - name: Daten von neuhausen.ch holen
+        run: python neuhausen_daten.py
+
+      - name: Neue Daten speichern
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add neuhausen_daten.js
+          git diff --staged --quiet || git commit -m "Daten aktualisiert"
+          git push
