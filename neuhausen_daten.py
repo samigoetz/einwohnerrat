@@ -35,6 +35,8 @@ VORSTOSS_QUELLEN = [
     {"art": "Motion",         "kuerzel": "mo", "url": "https://neuhausen.ch/motionen"},
 ]
 BA_URL = "https://neuhausen.ch/berichte_antraege"
+BP_URL = "https://neuhausen.ch/beschluesse_protokolle"
+FEED_AUSGABE = BASIS / "feed.xml"
 
 # ---------------------------------------------------------------------------
 # FRAKTIONSZUORDNUNG  (bitte selbst ergaenzen und korrigieren!)
@@ -91,6 +93,7 @@ FRAKTIONEN = {
     "Sabina Tektas-Sorg": "SP",
     "Sara Jucker": "SVP",
     "Andreas Neuenschwander": "SVP",
+    "Ruedi Meier": "SP",
     "Markus Anderegg": "FDP",
     "Michael Bernath": "ÖBS",
     "René Sauzet": "FDP",
@@ -323,9 +326,166 @@ def parse_berichte(html: str) -> list:
     return ergebnis
 
 
+def parse_beschluesse(html: str) -> list:
+    """
+    Beschluesse & Protokolle: gleiche Pseudo-Tabellenstruktur, Spalten
+    Datum, Nummer, Inhalt. Da die row-Nummern abweichen koennen, wird
+    flexibel gearbeitet:
+      Datum  = Zelle mit Datumsformat
+      Inhalt = Zelle mit den meisten fileupload-Links
+      Nummer = kuerzeste uebrige Textzelle ohne Links
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    ergebnis = []
+    gesehen = set()
+
+    for zeile in soup.find_all("div", class_="tr"):
+        zellen = zeile.find_all(
+            "span", class_=lambda c: c and "td" in c.split()
+        )
+        if len(zellen) < 2:
+            continue
+
+        datum, nummer = "", ""
+        inhalt_zelle, max_links = None, 0
+        text_zellen = []
+
+        for td in zellen:
+            text = sauber(td.get_text())
+            n_links = len([a for a in td.find_all("a", href=True)
+                           if "/fileupload/" in a["href"]])
+            if n_links > max_links:
+                max_links, inhalt_zelle = n_links, td
+                continue
+            if not datum and DATUM_RE.match(text):
+                datum = text
+            elif text and n_links == 0:
+                text_zellen.append(text)
+
+        if not datum:
+            continue
+        if text_zellen:
+            nummer = min(text_zellen, key=len)
+
+        dokumente, seen2 = [], set()
+        if inhalt_zelle is not None:
+            for a in inhalt_zelle.find_all("a", href=True):
+                if "/fileupload/" not in a["href"]:
+                    continue
+                t = sauber(a.get_text())
+                u = absolut(a["href"])
+                if (t, u) in seen2:
+                    continue
+                seen2.add((t, u))
+                dokumente.append({"titel": t, "url": u})
+
+        if dokumente:
+            haupt = dokumente[0]
+            beilagen = dokumente[1:]
+        else:
+            # Zeile ohne Dokumentlinks: laengste Textzelle als Titel verwenden
+            lange = [t for t in text_zellen if t != nummer]
+            if not lange:
+                continue
+            haupt = {"titel": max(lange, key=len), "url": BP_URL}
+            beilagen = []
+
+        schluessel = f"bp|{datum}|{nummer}|{haupt['titel']}"
+        if schluessel in gesehen:
+            continue
+        gesehen.add(schluessel)
+
+        ergebnis.append({
+            "schluessel": schluessel,
+            "datum": datum,
+            "nummer": nummer,
+            "haupt": haupt,
+            "beilagen": beilagen,
+        })
+    return ergebnis
+
+
+_WOCHENTAGE = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+_MONATE = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def _rfc822(datum: str) -> str:
+    """dd.mm.yyyy -> RFC-822-Datum (12:00 Schweizer Zeit), fuer RSS."""
+    m = re.match(r"^(\d{2})\.(\d{2})\.(\d{4})$", datum)
+    if not m:
+        return ""
+    dt = datetime(int(m.group(3)), int(m.group(2)), int(m.group(1)), 12, 0,
+                  tzinfo=_ZEITZONE)
+    offset = dt.strftime("%z") or "+0000"
+    return (f"{_WOCHENTAGE[dt.weekday()]}, {dt.day:02d} "
+            f"{_MONATE[dt.month - 1]} {dt.year} 12:00:00 {offset}")
+
+
+def baue_feed(vorstoesse: list, berichte: list, beschluesse: list) -> str:
+    """Erzeugt einen RSS-2.0-Feed mit den neuesten Eintraegen aller Bereiche."""
+    from xml.sax.saxutils import escape
+
+    def datum_zahl(d):
+        m = re.match(r"^(\d{2})\.(\d{2})\.(\d{4})$", d)
+        return int(m.group(3) + m.group(2) + m.group(1)) if m else 0
+
+    eintraege = []
+    for v in vorstoesse:
+        eintraege.append({
+            "titel": f"[{v['art']}] {v['titel']}",
+            "url": v["url"], "datum": v["datum"], "id": v["schluessel"],
+        })
+    for b in berichte:
+        eintraege.append({
+            "titel": f"[Bericht & Antrag] {b['haupt']['titel']}",
+            "url": b["haupt"]["url"], "datum": b["datum"], "id": b["schluessel"],
+        })
+    for p in beschluesse:
+        eintraege.append({
+            "titel": f"[Beschluss/Protokoll] {p['haupt']['titel']}",
+            "url": p["haupt"]["url"], "datum": p["datum"], "id": p["schluessel"],
+        })
+
+    eintraege.sort(key=lambda e: datum_zahl(e["datum"]), reverse=True)
+    eintraege = eintraege[:60]
+
+    jetzt = datetime.now(_ZEITZONE)
+    offset = jetzt.strftime("%z") or "+0000"
+    build = (f"{_WOCHENTAGE[jetzt.weekday()]}, {jetzt.day:02d} "
+             f"{_MONATE[jetzt.month - 1]} {jetzt.year} "
+             f"{jetzt.hour:02d}:{jetzt.minute:02d}:00 {offset}")
+
+    teile = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<rss version="2.0">',
+        "<channel>",
+        "<title>Einwohnerrat Neuhausen am Rheinfall</title>",
+        "<link>https://neuhausen.ch/einwohnerrat</link>",
+        "<description>Vorstösse, Berichte &amp; Anträge sowie Beschlüsse &amp; "
+        "Protokolle des Einwohnerrats Neuhausen am Rheinfall. "
+        "Automatisch aufbereitet.</description>",
+        "<language>de-ch</language>",
+        f"<lastBuildDate>{build}</lastBuildDate>",
+    ]
+    for e in eintraege:
+        teile.append("<item>")
+        teile.append(f"<title>{escape(e['titel'])}</title>")
+        teile.append(f"<link>{escape(e['url'])}</link>")
+        teile.append(f'<guid isPermaLink="false">{escape(e["id"])}</guid>')
+        pub = _rfc822(e["datum"])
+        if pub:
+            teile.append(f"<pubDate>{pub}</pubDate>")
+        teile.append("</item>")
+    teile.append("</channel>")
+    teile.append("</rss>")
+    return "\n".join(teile) + "\n"
+
+
 def main():
     vorstoesse = []
     berichte = []
+    beschluesse = []
     fehler = []
 
     for quelle in VORSTOSS_QUELLEN:
@@ -346,11 +506,20 @@ def main():
         fehler.append(f"Berichte & Antraege: {e}")
         print(f"  Berichte&Antraege FEHLER: {e}", file=sys.stderr)
 
+    try:
+        html = hole(BP_URL)
+        beschluesse = parse_beschluesse(html)
+        print(f"  Beschl.&Protokolle {len(beschluesse):>2} Eintraege")
+    except Exception as e:
+        fehler.append(f"Beschluesse & Protokolle: {e}")
+        print(f"  Beschl.&Protokolle FEHLER: {e}", file=sys.stderr)
+
     daten = {
         "erzeugt": datetime.now(_ZEITZONE).strftime("%d.%m.%Y %H:%M"),
         "fehler": fehler,
         "vorstoesse": vorstoesse,
         "berichte": berichte,
+        "beschluesse": beschluesse,
     }
 
     if UNBEKANNTE_PERSONEN:
@@ -361,8 +530,14 @@ def main():
 
     js = "window.NEUHAUSEN_DATEN = " + json.dumps(daten, ensure_ascii=False) + ";\n"
     AUSGABE.write_text(js, encoding="utf-8")
+
+    feed = baue_feed(vorstoesse, berichte, beschluesse)
+    FEED_AUSGABE.write_text(feed, encoding="utf-8")
+
     print(f"Geschrieben: {AUSGABE}  "
-          f"({len(vorstoesse)} Vorstoesse, {len(berichte)} Berichte)")
+          f"({len(vorstoesse)} Vorstoesse, {len(berichte)} Berichte, "
+          f"{len(beschluesse)} Beschluesse)")
+    print(f"Geschrieben: {FEED_AUSGABE}")
 
     if fehler and not vorstoesse and not berichte:
         sys.exit(1)

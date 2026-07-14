@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Übersicht Einwohnerrat · SP Neuhausen</title>
+<link rel="alternate" type="application/rss+xml" title="Einwohnerrat Neuhausen" href="feed.xml">
 <style>
   :root {
     --rot: #E2001A;
@@ -32,10 +33,6 @@
 
   .kopf { background: var(--rot); color: var(--weiss); padding: 34px 0 26px; }
   .kopf .wrap { padding-bottom: 0; }
-  .eyebrow {
-    font-size: 12px; font-weight: 700; letter-spacing: 0.18em;
-    text-transform: uppercase; margin: 0 0 8px; opacity: 0.92;
-  }
   h1 {
     font-size: clamp(30px, 5.5vw, 48px); font-weight: 800;
     letter-spacing: -0.015em; line-height: 1.02; margin: 0;
@@ -72,15 +69,15 @@
   .tab {
     flex: 1 1 auto; background: var(--weiss); color: var(--schwarz);
     border: none; border-right: 1px solid var(--linie);
-    padding: 15px 10px 13px; font-size: 13.5px; font-weight: 800;
-    text-transform: uppercase; letter-spacing: 0.08em; cursor: pointer;
+    padding: 15px 8px 13px; font-size: 13px; font-weight: 800;
+    text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer;
     transition: background 0.1s ease, color 0.1s ease;
   }
   .tab:last-child { border-right: none; }
   .tab:hover { background: var(--rosa); color: var(--rot-dunkel); }
   .tab.aktiv { background: var(--rot); color: var(--weiss); }
   .tab:focus-visible { outline: 3px solid var(--rot); outline-offset: -3px; }
-  .tab .anzahl { display: inline-block; margin-left: 6px; font-weight: 600; opacity: 0.75; font-size: 11.5px; }
+  .tab .anzahl { display: inline-block; margin-left: 5px; font-weight: 600; opacity: 0.75; font-size: 11px; }
 
   .panel { display: none; padding-top: 26px; }
   .panel.aktiv { display: block; }
@@ -102,9 +99,15 @@
   }
   .suche:focus-visible { outline: 3px solid var(--rot); outline-offset: 1px; }
 
-  /* Tabellen ohne inneren Scrollbereich: die Seite scrollt als Ganzes,
-     die Spaltenzeile bleibt unter der Tab-Leiste fixiert
-     (Abstand wird per JS exakt gemessen, siehe --kopf-offset). */
+  /* Mobiles Sortier-Auswahlfeld (nur auf schmalen Bildschirmen sichtbar) */
+  .mobil-sort { display: none; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+  .mobil-sort select {
+    font: inherit; font-size: 13px; text-transform: none; letter-spacing: 0;
+    padding: 7px 8px; border: 2px solid var(--schwarz); border-radius: 0;
+    background: var(--weiss); color: var(--schwarz);
+  }
+
+  /* Tabellen: Seite scrollt als Ganzes, Spaltenzeile fix unter der Tab-Leiste */
   table.daten {
     width: 100%; border-collapse: collapse; font-size: 14px;
     border: 2px solid var(--schwarz);
@@ -126,6 +129,7 @@
   table.daten tbody tr.neu:hover { background: var(--rosa-mittel); }
 
   td.datum { font-size: 12.5px; color: var(--grau); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  td.nummer-zelle { font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; font-weight: 600; }
   td.person { font-weight: 600; }
   td.titel a { color: var(--schwarz); text-decoration: none; border-bottom: 1px solid var(--rosa-mittel); font-weight: 500; }
   td.titel a:hover { color: var(--rot); border-bottom-color: var(--rot); }
@@ -138,6 +142,7 @@
   td.titel .beilagen { margin-top: 5px; display: flex; flex-wrap: wrap; gap: 3px 14px; }
   td.titel .beilagen a { font-size: 12px; color: var(--rot); text-decoration: none; font-weight: 600; border-bottom: none; }
   td.titel .beilagen a:hover { text-decoration: underline; }
+  td.art-zelle { font-size: 12.5px; }
 
   .art {
     display: inline-block; font-size: 10px; font-weight: 800;
@@ -233,7 +238,7 @@
   .jahr-saeule .wert { font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums; }
   .jahr-saeule .stab { width: 100%; background: var(--rosa-mittel); }
   .jahr-saeule.aktiv .stab { background: var(--rot); }
-  .jahr-saeule .lab { font-size: 10px; color: var(--grau); font-weight: 700; transform: rotate(-45deg); transform-origin: center; margin-top: 6px; }
+  .jahr-saeule .lab { font-size: 10px; color: var(--grau); font-weight: 700; margin-top: 6px; }
 
   .leer, .fehler { font-size: 14px; color: var(--grau); padding: 20px 14px; }
   .fehler {
@@ -247,6 +252,7 @@
   }
   footer b { color: var(--schwarz); }
   footer code { background: var(--grau-hell); padding: 1px 5px; font-size: 11px; }
+  footer a { color: var(--rot); font-weight: 600; }
   .reset {
     background: none; border: none; color: var(--rot); padding: 0;
     font-size: inherit; font-weight: 600; text-decoration: underline;
@@ -254,14 +260,39 @@
   }
   .reset:hover { background: none; color: var(--rot-dunkel); }
 
+  /* ---------- Mobil: Kartenlayout ---------- */
   @media (max-width: 680px) {
+    .mobil-sort { display: flex; flex: 1 1 100%; }
+    .tab { font-size: 10px; letter-spacing: 0.02em; padding: 12px 4px 10px; }
+    .tab .anzahl { display: none; }
+
+    table.daten { display: block; border-width: 2px; }
+    table.daten thead { display: none; }
+    table.daten tbody { display: block; }
+    table.daten tbody tr {
+      display: flex; flex-wrap: wrap; align-items: center;
+      gap: 3px 10px; padding: 12px;
+      border-bottom: 1px solid var(--linie);
+    }
+    table.daten tbody tr:last-child { border-bottom: none; }
+    table.daten tbody td { display: block; padding: 0; border: none; }
+    table.daten tbody td:empty { display: none; }
+    td.datum { order: 1; }
+    td.status-zelle { order: 2; margin-left: auto; }
+    td.nummer-zelle { order: 2; margin-left: auto; }
+    td.titel { order: 3; width: 100%; margin-top: 3px; }
+    td.person { order: 4; font-size: 12.5px; }
+    td.fraktion { order: 5; }
+    td.art-zelle { order: 6; }
+    td.leer, td.fehler { width: 100%; }
+
     .pend-zeile { grid-template-columns: 74px 1fr 64px; }
     .pend-zeile .balken { display: none; }
     .balken-zeile { grid-template-columns: 92px 1fr 44px; gap: 8px; }
     .balken-label { font-size: 11.5px; }
-    .tab { font-size: 11px; letter-spacing: 0.04em; padding: 13px 6px 11px; }
-    .jahr-chart { height: 150px; }
-    td.person { white-space: normal; }
+    .jahr-chart { height: 150px; gap: 3px; }
+    .jahr-saeule .wert { font-size: 9px; }
+    .jahr-saeule .lab { font-size: 8.5px; }
   }
   @media (prefers-reduced-motion: reduce) {
     * { animation: none !important; transition: none !important; }
@@ -272,7 +303,6 @@
 
 <div class="kopf">
   <div class="wrap">
-    <p class="eyebrow">by SP Neuhausen</p>
     <h1>Übersicht Einwohnerrat</h1>
     <div class="statuszeile">
       <div class="status">
@@ -290,6 +320,7 @@
 <nav class="tabs" id="tabs" aria-label="Bereiche">
   <button class="tab aktiv" data-panel="vorstoesse">Vorstösse<span class="anzahl" id="tabzahl-v"></span></button>
   <button class="tab" data-panel="berichte">Berichte &amp; Anträge<span class="anzahl" id="tabzahl-b"></span></button>
+  <button class="tab" data-panel="protokolle">Beschlüsse &amp; Protokolle<span class="anzahl" id="tabzahl-p"></span></button>
   <button class="tab" data-panel="statistik">Statistik</button>
 </nav>
 
@@ -305,6 +336,17 @@
       <button class="chip" data-art="Postulat">Postulate</button>
       <button class="chip" data-art="Motion">Motionen</button>
       <input type="text" class="suche" id="suche" placeholder="Suche Person, Fraktion oder Titel …">
+      <label class="mobil-sort">Sortieren
+        <select id="sort-v">
+          <option value="datum|-1" selected>Datum (neuste zuerst)</option>
+          <option value="datum|1">Datum (älteste zuerst)</option>
+          <option value="titel|1">Titel</option>
+          <option value="art|1">Art</option>
+          <option value="person|1">Person</option>
+          <option value="fraktion|1">Fraktion</option>
+          <option value="status|1">Status</option>
+        </select>
+      </label>
     </div>
     <table class="daten" id="tabelle-vorstoesse">
       <thead>
@@ -328,6 +370,15 @@
     <p class="panel-hinweis">Vollständige Liste, neueste zuoberst.</p>
     <div class="filter">
       <input type="text" class="suche" id="ba-suche" placeholder="Suche Titel, Beilage oder Art …">
+      <label class="mobil-sort">Sortieren
+        <select id="sort-b">
+          <option value="datum|-1" selected>Datum (neuste zuerst)</option>
+          <option value="datum|1">Datum (älteste zuerst)</option>
+          <option value="titel|1">Titel</option>
+          <option value="art|1">Art</option>
+          <option value="status|1">Status</option>
+        </select>
+      </label>
     </div>
     <table class="daten" id="tabelle-berichte">
       <thead>
@@ -344,6 +395,34 @@
     </table>
   </section>
 
+  <!-- TAB: BESCHLÜSSE & PROTOKOLLE -->
+  <section class="panel" id="panel-protokolle">
+    <p class="panel-hinweis">Beschlüsse und Sitzungsprotokolle des Einwohnerrats, neueste zuoberst.</p>
+    <div class="filter">
+      <input type="text" class="suche" id="bp-suche" placeholder="Suche Inhalt oder Nummer …">
+      <label class="mobil-sort">Sortieren
+        <select id="sort-p">
+          <option value="datum|-1" selected>Datum (neuste zuerst)</option>
+          <option value="datum|1">Datum (älteste zuerst)</option>
+          <option value="nummer|1">Nummer</option>
+          <option value="titel|1">Inhalt</option>
+        </select>
+      </label>
+    </div>
+    <table class="daten" id="tabelle-protokolle">
+      <thead>
+        <tr>
+          <th data-sort="datum" class="sortiert">Datum<span class="pfeil">▼</span></th>
+          <th data-sort="nummer">Nummer<span class="pfeil"></span></th>
+          <th data-sort="titel">Inhalt<span class="pfeil"></span></th>
+        </tr>
+      </thead>
+      <tbody id="bp-body">
+        <tr><td colspan="3" class="leer">Wird geladen …</td></tr>
+      </tbody>
+    </table>
+  </section>
+
   <!-- TAB: STATISTIK -->
   <section class="panel" id="panel-statistik">
     <div class="filter" id="jahr-filter"></div>
@@ -356,8 +435,10 @@
       <code>neuhausen_daten.py</code> aufbereitet: online automatisch stündlich
       (GitHub Actions), lokal per Terminal-Lauf. <b>Neu hinzugekommene Einträge</b>
       werden in diesem Browser rot hervorgehoben; beim allerersten Laden gilt alles
-      als bekannt. Fraktionszuordnungen pflegst du in der Liste
-      <code>FRAKTIONEN</code> im Skript.
+      als bekannt. Neuigkeiten lassen sich auch als
+      <a href="feed.xml">RSS-Feed</a> abonnieren (Adresse der Datei
+      <code>feed.xml</code> in eine Feedreader-App eintragen).
+      Fraktionszuordnungen pflegst du in der Liste <code>FRAKTIONEN</code> im Skript.
     </p>
     <p>Neu aufsetzen? <button class="reset" id="reset">Gespeicherten Stand löschen</button></p>
   </footer>
@@ -376,11 +457,14 @@
 
   var vorstoesse = [];
   var baEintraege = [];
+  var bpEintraege = [];
   var aktiverFilter = "alle";
   var suchText = "";
   var baSuchText = "";
+  var bpSuchText = "";
   var vSort = { feld: "datum", richtung: -1 };
   var bSort = { feld: "datum", richtung: -1 };
+  var pSort = { feld: "datum", richtung: -1 };
   var jahrFilter = "alle";
 
   var ART_FARBEN = { ka: "farb-ka", ip: "farb-ip", po: "farb-po", mo: "farb-mo" };
@@ -403,9 +487,8 @@
   };
 
   var $ = function (id) { return document.getElementById(id); };
+  function istMobil() { return window.matchMedia("(max-width: 680px)").matches; }
 
-  // Tab-Leisten-Hoehe exakt messen, damit die fixierte Spaltenzeile
-  // buendig darunter sitzt und keine Zeile dahinter verschwinden kann.
   function messeKopfOffset() {
     var h = $("tabs").offsetHeight;
     document.documentElement.style.setProperty("--kopf-offset", h + "px");
@@ -499,6 +582,7 @@
         tr.appendChild(tdT);
 
         var tdA = document.createElement("td");
+        tdA.className = "art-zelle";
         var art = document.createElement("span");
         art.className = "art"; art.textContent = v.art;
         tdA.appendChild(art);
@@ -524,6 +608,7 @@
         tr.appendChild(tdF);
 
         var tdS = document.createElement("td");
+        tdS.className = "status-zelle";
         var badge = document.createElement("span");
         badge.className = "status-badge " + statusKlasse(v.status);
         badge.textContent = v.status || "\u2013";
@@ -596,11 +681,12 @@
         tr.appendChild(tdT);
 
         var tdA = document.createElement("td");
+        tdA.className = "art-zelle";
         tdA.textContent = e.art || "\u2013";
-        tdA.style.fontSize = "12.5px";
         tr.appendChild(tdA);
 
         var tdS = document.createElement("td");
+        tdS.className = "status-zelle";
         var badge = document.createElement("span");
         badge.className = "status-badge " + statusKlasse(e.status);
         badge.textContent = e.status || "\u2013";
@@ -611,6 +697,74 @@
       });
     }
     $("tabzahl-b").textContent = "(" + baEintraege.length + ")";
+  }
+
+  // ---- Rendering: Beschluesse & Protokolle -------------------------------------
+  function rendereBP() {
+    var body = $("bp-body");
+    body.innerHTML = "";
+
+    var liste = bpEintraege.filter(function (e) {
+      if (!bpSuchText) return true;
+      var hay = (e.haupt.titel + " " + (e.nummer || "") + " " +
+        (e.beilagen || []).map(function (b) { return b.titel; }).join(" ")).toLowerCase();
+      return hay.indexOf(bpSuchText) >= 0;
+    });
+
+    liste.sort(function (a, b) {
+      var f = pSort.feld, av, bv;
+      if (f === "datum") { av = a.datumZ; bv = b.datumZ; }
+      else if (f === "titel") { av = a.haupt.titel.toLowerCase(); bv = b.haupt.titel.toLowerCase(); }
+      else { av = (a[f] || "").toLowerCase(); bv = (b[f] || "").toLowerCase(); }
+      if (av < bv) return -1 * pSort.richtung;
+      if (av > bv) return 1 * pSort.richtung;
+      return b.datumZ - a.datumZ;
+    });
+
+    if (!liste.length) {
+      body.innerHTML = '<tr><td colspan="3" class="leer">Keine Eintr\u00e4ge f\u00fcr diese Auswahl.</td></tr>';
+    } else {
+      liste.forEach(function (e) {
+        var tr = document.createElement("tr");
+        if (e._neu) tr.className = "neu";
+
+        var tdD = document.createElement("td");
+        tdD.className = "datum"; tdD.textContent = e.datum;
+        tr.appendChild(tdD);
+
+        var tdN = document.createElement("td");
+        tdN.className = "nummer-zelle";
+        tdN.textContent = e.nummer || "\u2013";
+        tr.appendChild(tdN);
+
+        var tdT = document.createElement("td");
+        tdT.className = "titel";
+        if (e._neu) {
+          var mm = document.createElement("span");
+          mm.className = "marke-neu"; mm.textContent = "Neu";
+          tdT.appendChild(mm);
+        }
+        var a = document.createElement("a");
+        a.href = e.haupt.url; a.target = "_blank"; a.rel = "noopener";
+        a.textContent = e.haupt.titel;
+        tdT.appendChild(a);
+        if (e.beilagen && e.beilagen.length) {
+          var bl = document.createElement("div");
+          bl.className = "beilagen";
+          e.beilagen.forEach(function (b) {
+            var ba = document.createElement("a");
+            ba.href = b.url; ba.target = "_blank"; ba.rel = "noopener";
+            ba.textContent = "+ " + b.titel;
+            bl.appendChild(ba);
+          });
+          tdT.appendChild(bl);
+        }
+        tr.appendChild(tdT);
+
+        body.appendChild(tr);
+      });
+    }
+    $("tabzahl-p").textContent = "(" + bpEintraege.length + ")";
   }
 
   // ---- Rendering: Statistik ----------------------------------------------------
@@ -809,9 +963,10 @@
     var maxJ = 0;
     jahre.forEach(function (j) { if (proJahr[j] > maxJ) maxJ = proJahr[j]; });
 
+    var mobil = istMobil();
     var chart = document.createElement("div");
     chart.className = "jahr-chart";
-    jahre.forEach(function (j) {
+    jahre.forEach(function (j, idx) {
       var s = document.createElement("div");
       s.className = "jahr-saeule" + (jahrFilter === j ? " aktiv" : "");
       var w = document.createElement("div");
@@ -819,11 +974,17 @@
       s.appendChild(w);
       var stab = document.createElement("div");
       stab.className = "stab";
-      stab.style.height = Math.max(3, proJahr[j] / maxJ * 130) + "px";
+      stab.style.height = Math.max(3, proJahr[j] / maxJ * (mobil ? 95 : 130)) + "px";
       stab.title = j + ": " + proJahr[j] + " Vorst\u00f6sse";
       s.appendChild(stab);
       var lab = document.createElement("div");
-      lab.className = "lab"; lab.textContent = j;
+      lab.className = "lab";
+      // Auf schmalen Bildschirmen Kurzform und nur jedes zweite Jahr anschreiben
+      if (mobil) {
+        lab.textContent = (jahre.length > 10 && idx % 2 === 1) ? "" : "\u2019" + j.slice(2);
+      } else {
+        lab.textContent = j;
+      }
       s.appendChild(lab);
       chart.appendChild(s);
     });
@@ -840,26 +1001,26 @@
 
     vorstoesse = [];
     baEintraege = [];
+    bpEintraege = [];
 
-    (d.vorstoesse || []).forEach(function (v) {
-      v.datumZ = datumZahl(v.datum);
-      v._neu = !ersterLauf && !bekannt[v.schluessel];
-      if (v._neu) neueGesamt++;
-      bekannt[v.schluessel] = 1;
-      vorstoesse.push(v);
-    });
-    (d.berichte || []).forEach(function (e) {
-      e.datumZ = datumZahl(e.datum);
-      e._neu = !ersterLauf && !bekannt[e.schluessel];
-      if (e._neu) neueGesamt++;
-      bekannt[e.schluessel] = 1;
-      baEintraege.push(e);
-    });
+    function nimm(liste, ziel) {
+      (liste || []).forEach(function (e) {
+        e.datumZ = datumZahl(e.datum);
+        e._neu = !ersterLauf && !bekannt[e.schluessel];
+        if (e._neu) neueGesamt++;
+        bekannt[e.schluessel] = 1;
+        ziel.push(e);
+      });
+    }
+    nimm(d.vorstoesse, vorstoesse);
+    nimm(d.berichte, baEintraege);
+    nimm(d.beschluesse, bpEintraege);
 
     stand.bekannt = bekannt;
     speichereStand(stand);
     rendereVorstoesse();
     rendereBA();
+    rendereBP();
     rendereJahrFilter();
     rendereStatistik();
 
@@ -883,8 +1044,8 @@
       setStatus("Noch keine Daten vorhanden \u2013 bitte die Aktualisierung einmal laufen lassen.", "err");
       $("vorstoss-body").innerHTML =
         '<tr><td colspan="6" class="leer">Keine Daten. Auf GitHub: Actions \u2192 \u00abDaten aktualisieren\u00bb \u2192 Run workflow. Lokal: <code>python3 neuhausen_daten.py</code> ausf\u00fchren.</td></tr>';
-      $("ba-body").innerHTML =
-        '<tr><td colspan="4" class="leer">Keine Daten.</td></tr>';
+      $("ba-body").innerHTML = '<tr><td colspan="4" class="leer">Keine Daten.</td></tr>';
+      $("bp-body").innerHTML = '<tr><td colspan="3" class="leer">Keine Daten.</td></tr>';
       $("stat-bereich").innerHTML = '<p class="leer">Keine Daten.</p>';
     }
   }
@@ -942,6 +1103,10 @@
     baSuchText = this.value.toLowerCase().trim();
     rendereBA();
   });
+  $("bp-suche").addEventListener("input", function () {
+    bpSuchText = this.value.toLowerCase().trim();
+    rendereBP();
+  });
 
   function sortierungVerdrahten(tabelleId, sortObjekt, renderFn) {
     document.querySelectorAll("#" + tabelleId + " thead th").forEach(function (th) {
@@ -962,6 +1127,28 @@
   }
   sortierungVerdrahten("tabelle-vorstoesse", vSort, rendereVorstoesse);
   sortierungVerdrahten("tabelle-berichte", bSort, rendereBA);
+  sortierungVerdrahten("tabelle-protokolle", pSort, rendereBP);
+
+  function mobilSortVerdrahten(selectId, sortObjekt, renderFn) {
+    $(selectId).addEventListener("change", function () {
+      var teile = this.value.split("|");
+      sortObjekt.feld = teile[0];
+      sortObjekt.richtung = parseInt(teile[1], 10);
+      renderFn();
+    });
+  }
+  mobilSortVerdrahten("sort-v", vSort, rendereVorstoesse);
+  mobilSortVerdrahten("sort-b", bSort, rendereBA);
+  mobilSortVerdrahten("sort-p", pSort, rendereBP);
+
+  // Bei Wechsel zwischen Handy- und Desktopbreite Statistik neu zeichnen
+  var warMobil = istMobil();
+  window.addEventListener("resize", function () {
+    if (istMobil() !== warMobil) {
+      warMobil = istMobil();
+      rendereStatistik();
+    }
+  });
 
   $("reset").addEventListener("click", function () {
     if (confirm("Gespeicherten Stand l\u00f6schen? Beim n\u00e4chsten Laden gilt wieder alles als bekannt.")) {
