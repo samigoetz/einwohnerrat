@@ -103,6 +103,8 @@ FRAKTIONEN = {
     "Sara Jucker": "SVP",
     "Andreas Neuenschwander": "SVP",
     "Ruedi Meier": "SP",
+    "Rolf Forster": "SVP",
+    "Robert Eichmann": "SVP",
     "Markus Anderegg": "FDP",
     "Michael Bernath": "ÖBS",
     "René Sauzet": "FDP",
