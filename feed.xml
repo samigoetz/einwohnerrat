@@ -5,7 +5,7 @@
 <link>https://neuhausen.ch/einwohnerrat</link>
 <description>Vorstösse, Berichte &amp; Anträge sowie Beschlüsse &amp; Protokolle des Einwohnerrats Neuhausen am Rheinfall. Automatisch aufbereitet.</description>
 <language>de-ch</language>
-<lastBuildDate>Thu, 16 Jul 2026 15:06:00 +0200</lastBuildDate>
+<lastBuildDate>Thu, 16 Jul 2026 19:48:00 +0200</lastBuildDate>
 <item>
 <title>[Aktuelles] Gemeinde Neuhausen am Rheinfall spendet für Erdbebenopfer in Venezuela</title>
 <link>https://neuhausen.ch/aktuelles</link>
@@ -49,12 +49,6 @@
 <pubDate>Mon, 15 Jun 2026 12:00:00 +0200</pubDate>
 </item>
 <item>
-<title>[Aktuelles] Abstimmungsresultate vom 14. Juni 2026</title>
-<link>https://neuhausen.ch/aktuelles</link>
-<guid isPermaLink="false">ak|14.06.2026|Abstimmungsresultate vom 14. Juni 2026</guid>
-<pubDate>Sun, 14 Jun 2026 12:00:00 +0200</pubDate>
-</item>
-<item>
 <title>[Beschluss/Protokoll] Beschlussprotokoll</title>
 <link>https://neuhausen.ch/fileupload/20260611 4. Sitzung Beschlussprotokoll.pdf</link>
 <guid isPermaLink="false">bp|12.06.2026|4. Sitzung|Beschlussprotokoll</guid>
@@ -83,12 +77,6 @@
 <link>https://neuhausen.ch/aktuelles</link>
 <guid isPermaLink="false">ak|27.05.2026|Dienstjubliäum im Alterszentrum Neuhausen am Rheinfall</guid>
 <pubDate>Wed, 27 May 2026 12:00:00 +0200</pubDate>
-</item>
-<item>
-<title>[Aktuelles] Öffnungszeiten Gemeindeverwaltung</title>
-<link>https://neuhausen.ch/aktuelles</link>
-<guid isPermaLink="false">ak|25.05.2026|Öffnungszeiten Gemeindeverwaltung</guid>
-<pubDate>Mon, 25 May 2026 12:00:00 +0200</pubDate>
 </item>
 <item>
 <title>[Bericht &amp; Antrag] Bericht und Antrag betreffend Beitritt zum Regionalen Naturpark Schaffhausen</title>
@@ -181,12 +169,6 @@
 <pubDate>Thu, 02 Apr 2026 12:00:00 +0200</pubDate>
 </item>
 <item>
-<title>[Aktuelles] Beginn der Brut- und Setzzeit der Wildtiere im Neuhauser Wald</title>
-<link>https://neuhausen.ch/aktuelles</link>
-<guid isPermaLink="false">ak|02.04.2026|Beginn der Brut- und Setzzeit der Wildtiere im Neuhauser Wald</guid>
-<pubDate>Thu, 02 Apr 2026 12:00:00 +0200</pubDate>
-</item>
-<item>
 <title>[Aktuelles] Trinkwasserqualität</title>
 <link>https://neuhausen.ch/aktuelles</link>
 <guid isPermaLink="false">ak|31.03.2026|Trinkwasserqualität</guid>
@@ -209,12 +191,6 @@
 <link>https://neuhausen.ch/fileupload/GR 190526 Beschluss- und Wortprotokoll der Einwohnerratssitzung 2 vom 5. März 2026  Beschlussprotokoll.pdf</link>
 <guid isPermaLink="false">bp|06.03.2026|2. Sitzung|Beschlussprotokoll</guid>
 <pubDate>Fri, 06 Mar 2026 12:00:00 +0100</pubDate>
-</item>
-<item>
-<title>[Aktuelles] Berufsbeistandschaft</title>
-<link>https://neuhausen.ch/aktuelles</link>
-<guid isPermaLink="false">ak|05.03.2026|Berufsbeistandschaft</guid>
-<pubDate>Thu, 05 Mar 2026 12:00:00 +0100</pubDate>
 </item>
 <item>
 <title>[Aktuelles] Jugendförderbeiträge</title>
@@ -365,6 +341,30 @@
 <link>https://neuhausen.ch/aktuelles</link>
 <guid isPermaLink="false">ak|30.10.2025|Äusserst gute Trinkwasserqualität</guid>
 <pubDate>Thu, 30 Oct 2025 12:00:00 +0100</pubDate>
+</item>
+<item>
+<title>[Aktuelles] BauInfo Aufwertung Ortsdurchfahrt Neuhausen am Rheinfall 2025–2027</title>
+<link>https://neuhausen.ch/aktuelles</link>
+<guid isPermaLink="false">ak|27.10.2025|BauInfo Aufwertung Ortsdurchfahrt Neuhausen am Rheinfall 2025–2027</guid>
+<pubDate>Mon, 27 Oct 2025 12:00:00 +0100</pubDate>
+</item>
+<item>
+<title>[Bericht &amp; Antrag] Finanzplan 2027-2029</title>
+<link>https://neuhausen.ch/fileupload/C_GR 100924 BzK Finanzplan 2027 - 2029.pdf</link>
+<guid isPermaLink="false">ba|23.10.2025|Finanzplan 2027-2029</guid>
+<pubDate>Thu, 23 Oct 2025 12:00:00 +0200</pubDate>
+</item>
+<item>
+<title>[Bericht &amp; Antrag] Budget 2026 inkl. Bericht und Antrag Geschäftsprüfungskommission</title>
+<link>https://neuhausen.ch/fileupload/A_Gde Neuhausen_Budget 2026_Vorlage ER.pdf</link>
+<guid isPermaLink="false">ba|23.10.2025|Budget 2026 inkl. Bericht und Antrag Geschäftsprüfungskommission</guid>
+<pubDate>Thu, 23 Oct 2025 12:00:00 +0200</pubDate>
+</item>
+<item>
+<title>[Bericht &amp; Antrag] Stellenplan 2026</title>
+<link>https://neuhausen.ch/fileupload/B_GR 190825 B A Stellenplan 2026.pdf</link>
+<guid isPermaLink="false">ba|23.10.2025|Stellenplan 2026</guid>
+<pubDate>Thu, 23 Oct 2025 12:00:00 +0200</pubDate>
 </item>
 </channel>
 </rss>
