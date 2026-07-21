@@ -51,7 +51,7 @@ PRESSE_LEAD_MAX_PRO_LAUF = 40    # so viele fehlende Leads werden pro Lauf gehol
 PRESSE_RUECKFUELL_AB_JAHR = 2020
 KENNZAHLEN_AUSGABE = BASIS / "kennzahlen.js"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 6          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 7          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -1080,6 +1080,7 @@ def baue_presse() -> tuple:
 # ---------------------------------------------------------------------------
 
 _STATTAB_META = {}
+_STATTAB_BASIS_OK = {}
 
 
 def _stattab_reihe(cube: str, festlegungen: list,
@@ -1101,9 +1102,17 @@ def _stattab_reihe(cube: str, festlegungen: list,
     basis = f"{STATTAB_BASIS}/{cube}/{cube}.px"
     if cube not in _STATTAB_META:
         r = requests.get(basis, headers=HEADERS, timeout=60)
+        if r.status_code >= 400:
+            # Manche Wuerfel akzeptieren nur die kurze Adressform
+            alt_basis = f"{STATTAB_BASIS}/{cube}.px"
+            r2 = requests.get(alt_basis, headers=HEADERS, timeout=60)
+            if r2.status_code < 400:
+                basis, r = alt_basis, r2
         r.raise_for_status()
         _STATTAB_META[cube] = r.json()
+        _STATTAB_BASIS_OK[cube] = basis
     meta = _STATTAB_META[cube]
+    basis = _STATTAB_BASIS_OK.get(cube, basis)
 
     def wahl(texte, begriffe):
         klein = [t.lower() for t in texte]
@@ -1296,8 +1305,8 @@ def baue_kennzahlen() -> None:
     # und Geschlecht auf. Wir erzwingen ueberall das Total, sonst werden
     # Kategorien addiert und die Zahl zu hoch (frueher 11'834 statt ~10'500).
     BEV_FEST = {
-        "Staatsangehörigkeit (Kategorie)": ["staatsangehörigkeit - total", "total"],
-        "Geschlecht": ["geschlecht - total", "total"],
+        "Staatsangehörigkeit (Kategorie)": ["staatsangehörigkeit (kategorie) - total"],
+        "Geschlecht": ["geschlecht - total"],
         "Demografische Komponente": ["bestand am 31. dezember"],
     }
     try:
@@ -1321,27 +1330,26 @@ def baue_kennzahlen() -> None:
         except Exception as e:
             fehler.append(f"{name}: {e}")
 
-    # --- Ausländer:innenanteil (BFS, ständige Wohnbevölkerung) ---
-    # Der Wuerfel kennt KEINE Sammelkategorie "Ausland", sondern nur
-    # "Staatsangehörigkeit - Total", "Schweiz" und einzelne Laender.
-    # Ausland = Total - Schweiz. Beides aus derselben ständigen
-    # Wohnbevoelkerung, damit Zaehler und Nenner konsistent sind.
+    # --- Ausländer:innenanteil (BFS, demografische Bilanz) ---
+    # Derselbe Wuerfel wie die Bevoelkerung: er kennt die Kategorie "Ausland"
+    # direkt. Anteil = Ausland / Gesamt, beide "Bestand am 31. Dezember",
+    # Geschlecht-Total. Ergibt die amtlichen ~46 % (Gemeinde-PDF: 45.9 %).
     try:
-        typ = {"Bevölkerungstyp": ["ständige wohnbevölkerung", "ständige"]}
-        sa = "Staatsangehörigkeit (Kategorie)"
-        total, url = _stattab_reihe(
-            "px-x-0102010000_104", [],
-            fest={**typ, sa: ["staatsangehörigkeit - total", "total"]})
-        schweiz, _ = _stattab_reihe(
-            "px-x-0102010000_104", [],
-            fest={**typ, sa: ["schweiz"]})
-        ch = dict(schweiz)
+        gem = {"Geschlecht": ["geschlecht - total"],
+               "Demografische Komponente": ["bestand am 31. dezember"]}
+        sak = "Staatsangehörigkeit (Kategorie)"
+        ausland, url = _stattab_reihe(
+            "px-x-0102020000_201", [],
+            fest={**gem, sak: ["ausland"]})
+        gesamt, _ = _stattab_reihe(
+            "px-x-0102020000_201", [],
+            fest={**gem, sak: ["staatsangehörigkeit (kategorie) - total"]})
+        tot = dict(gesamt)
         reihe = []
-        for jahr, tot in total:
-            heimisch = ch.get(jahr)
-            if tot and heimisch is not None:
-                auslaender = tot - heimisch
-                reihe.append((jahr, round(auslaender / tot * 100, 1)))
+        for jahr, aus in ausland:
+            g = tot.get(jahr)
+            if g and aus is not None:
+                reihe.append((jahr, round(aus / g * 100, 1)))
         if reihe:
             karte("Bevölkerung", "Ausländer:innenanteil", "%",
                   reihe, "BFS, STAT-TAB", url)
@@ -1370,13 +1378,14 @@ def baue_kennzahlen() -> None:
     except Exception as e:
         fehler.append(f"Leerwohnungsziffer: {e}")
     try:
-        # Gebaeudetyp hat kein Total -> ueber alle Typen summieren
+        # Gesamtwert heisst "Gebäudetyp - alle"
         reihe, url = _stattab_reihe(
-            "px-x-0904030000_103", [], summiere=["gebäudetyp"])
+            "px-x-0904030000_103", [],
+            fest={"Gebäudetyp": ["gebäudetyp - alle"]})
         karte("Wohnen", "Neu erstellte Wohnungen", "Wohnungen",
               reihe, "BFS, STAT-TAB", url)
         print(f"  Kennzahlen: Neubau-Wohnungen {reihe[0][0]}\u2013"
-              f"{reihe[-1][0]} ({len(reihe)} Werte)")
+              f"{reihe[-1][0]} ({len(reihe)} Werte, aktuell {reihe[-1][1]})")
     except Exception as e:
         fehler.append(f"Neu erstellte Wohnungen: {e}")
 
@@ -1509,6 +1518,9 @@ def diagnose_stattab():
         try:
             basis = f"{STATTAB_BASIS}/{cube}/{cube}.px"
             r = requests.get(basis, headers=HEADERS, timeout=60)
+            if r.status_code >= 400:
+                r = requests.get(f"{STATTAB_BASIS}/{cube}.px",
+                                 headers=HEADERS, timeout=60)
             r.raise_for_status()
             meta = r.json()
             for var in meta.get("variables", []):
