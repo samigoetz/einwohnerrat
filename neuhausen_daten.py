@@ -51,7 +51,7 @@ PRESSE_LEAD_MAX_PRO_LAUF = 40    # so viele fehlende Leads werden pro Lauf gehol
 PRESSE_RUECKFUELL_AB_JAHR = 2020
 KENNZAHLEN_AUSGABE = BASIS / "kennzahlen.js"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 2          # bei Ausbau erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 4          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -1116,6 +1116,17 @@ def _stattab_reihe(cube: str, festlegungen: list,
                     return i
         return None
 
+    def waehle_total(code, texte, werte):
+        """Fuer Nicht-Regions-Dimensionen: eindeutig das Total nehmen.
+        Bricht ab, wenn kein klarer Total-Wert existiert (kein Raten)."""
+        i = wahl(texte, ["schweiz und ausland", "total", "gesamt",
+                         "alle ", "insgesamt", "- total"])
+        if i is not None:
+            return werte[i]
+        if len(werte) == 1:
+            return werte[0]
+        return None
+
     abfrage = []
     zeit_code = None
     for var in meta.get("variables", []):
@@ -1134,12 +1145,17 @@ def _stattab_reihe(cube: str, festlegungen: list,
                             "selection": {"filter": "item",
                                           "values": [var["values"][i]]}})
             continue
-        i = wahl(texte, festlegungen + ["total"])
-        if i is None:
-            raise RuntimeError(f"{cube}: keine eindeutige Auswahl fuer '{code}'")
+        i = wahl(texte, festlegungen)
+        if i is not None:
+            abfrage.append({"code": code,
+                            "selection": {"filter": "item",
+                                          "values": [var["values"][i]]}})
+            continue
+        total = waehle_total(code, texte, var["values"])
+        if total is None:
+            raise RuntimeError(f"{cube}: kein eindeutiges Total fuer '{code}'")
         abfrage.append({"code": code,
-                        "selection": {"filter": "item",
-                                      "values": [var["values"][i]]}})
+                        "selection": {"filter": "item", "values": [total]}})
     if zeit_code is None:
         raise RuntimeError(f"{cube}: keine Zeitachse gefunden")
 
@@ -1200,7 +1216,7 @@ def baue_kennzahlen() -> None:
                         if _ZEITZONE else datetime.now().strftime("%Y%m%d"))
             if (alt.get("naechste_pruefung", 0) > heute
                     and alt.get("bereiche")
-                    and alt.get("version", 1) >= KENNZAHLEN_VERSION):
+                    and alt.get("version", 1) == KENNZAHLEN_VERSION):
                 print("  Kennzahlen: Zwischenspeicher aktuell "
                       f"(naechste Pruefung ab {alt['naechste_pruefung']})")
                 return
@@ -1250,10 +1266,10 @@ def baue_kennzahlen() -> None:
     try:
         ausland, url = _stattab_reihe(
             "px-x-0102010000_104",
-            ["ausland", "ständige wohnbevölkerung"])
+            ["ausland", "ständige wohnbevölkerung", "bestand"])
         schweiz, _ = _stattab_reihe(
             "px-x-0102010000_104",
-            ["schweiz (staatsangeh", "schweiz", "ständige wohnbevölkerung"])
+            ["schweiz", "ständige wohnbevölkerung", "bestand"])
         ch = dict(schweiz)
         reihe = []
         for jahr, aus in ausland:
@@ -1326,6 +1342,45 @@ def baue_kennzahlen() -> None:
                 fehler.append(f"{name}: zu wenige Regionen lieferbar")
         except Exception as e:
             fehler.append(f"{name}: {e}")
+
+    # --- Stimmberechtigte im Verhaeltnis zur Bevoelkerung (BFS) ---
+    # Wichtig: Stimmberechtigt = Schweizer ab 18. Die Quote widerspiegelt
+    # daher auch Kinder- und Auslaenderanteil; das wird auf der Karte erklaert.
+    try:
+        stimm, url = _stattab_reihe(
+            "px-x-1702020000_101", ["wahlberechtigte", "stimmberechtigte"])
+        try:
+            bev_reihe, _ = _stattab_reihe(
+                "px-x-0102020000_201", ["bestand am 31. dezember"])
+            bev = dict(bev_reihe)
+        except Exception:
+            bev = {}
+        quote = []
+        absolut = []
+        for jahr, anzahl in stimm:
+            if anzahl:
+                absolut.append((jahr, int(anzahl)))
+            # passendes Bevoelkerungsjahr suchen (gleiches oder naechstfrueheres)
+            kandidaten = [j for j in bev if int(j) <= int(jahr)]
+            if anzahl and kandidaten:
+                bez = max(kandidaten, key=lambda j: int(j))
+                if bev[bez]:
+                    quote.append((jahr, round(anzahl / bev[bez] * 100, 1)))
+        if absolut:
+            karte("Bevölkerung", "Stimmberechtigte", "Personen",
+                  absolut, "BFS, STAT-TAB (Nationalratswahlen)", url,
+                  "Schweizer Staatsangehörige ab 18 Jahren")
+        if quote:
+            karte("Bevölkerung", "Anteil Stimmberechtigte", "%",
+                  quote, "BFS, STAT-TAB", url,
+                  "Anteil an der Gesamtbevölkerung. Stimmberechtigt sind nur "
+                  "Schweizer:innen ab 18 Jahren; der Wert widerspiegelt daher "
+                  "auch den Anteil Minderjähriger und den Ausländeranteil "
+                  "(in Neuhausen rund 40 %).")
+            print(f"  Kennzahlen: Anteil Stimmberechtigte {quote[0][0]}\\u2013"
+                  f"{quote[-1][0]} ({len(quote)} Werte)")
+    except Exception as e:
+        fehler.append(f"Stimmberechtigte: {e}")
 
     # --- Steuerfuesse (Kanton Schaffhausen, verifizierte Werte) ---
     steuer_url = "https://sh.ch/CMS/get/file/40a314f4-33a6-49d6-a6fa-da4c8868ab1b"
