@@ -45,7 +45,10 @@ PRESSE_SHN_URL = "https://www.shn.ch/region/neuhausen"
 PRESSE_SHAZ_FEED = "https://www.shaz.ch/feed/"
 PRESSE_GOOGLE_FEED = ("https://news.google.com/rss/search?"
                       "q=%22Neuhausen+am+Rheinfall%22&hl=de-CH&gl=CH&ceid=CH:de")
-PRESSE_MAX = 80
+PRESSE_ARCHIV_AUSGABE = BASIS / "presse_archiv.js"
+PRESSE_ANZEIGE_TAGE = 365        # juengere Artikel stehen direkt auf der Seite
+PRESSE_LEAD_MAX_PRO_LAUF = 40    # so viele fehlende Leads werden pro Lauf geholt
+PRESSE_RUECKFUELL_AB_JAHR = 2020
 FEED_AUSGABE = BASIS / "feed.xml"
 VOLLTEXT_AUSGABE = BASIS / "volltext.js"
 VOLLTEXT_MAX_ZEICHEN = 150000   # Textobergrenze pro Dokument
@@ -756,7 +759,9 @@ def _datum_aus_text(wert: str) -> str:
 
 
 def _kuerze_anriss(text: str, laenge: int = 240) -> str:
-    text = sauber(re.sub(r"<[^>]+>", " ", text or ""))
+    import html as _html
+    text = _html.unescape(_html.unescape(text or ""))
+    text = sauber(re.sub(r"<[^>]+>", " ", text))
     if len(text) > laenge:
         text = text[:laenge].rsplit(" ", 1)[0] + " \u2026"
     return text
@@ -783,7 +788,8 @@ def _parse_feed(xml_text: str) -> list:
             name = lokal(kind.tag)
             text = (kind.text or "").strip()
             if name == "title":
-                titel = sauber(text)
+                import html as _html
+                titel = sauber(_html.unescape(_html.unescape(text)))
             elif name == "link":
                 url = text or kind.get("href", "")
             elif name in ("pubDate", "published", "updated") and not datum:
@@ -821,20 +827,7 @@ def hole_presse() -> tuple:
 
     # 1) SHN, Rubrik Neuhausen (Datum steckt im Artikel-Link)
     try:
-        soup = BeautifulSoup(hole(PRESSE_SHN_URL), "html.parser")
-        for a in soup.find_all("a", href=True):
-            if "/region/neuhausen/" not in a["href"]:
-                continue
-            m = re.search(r"/(\d{4})-(\d{2})-(\d{2})/", a["href"])
-            if not m:
-                continue
-            titel = sauber(a.get_text())
-            if len(titel) < 15:
-                continue  # Navigations- und Weiterlesen-Links ueberspringen
-            url = a["href"]
-            if url.startswith("/"):
-                url = "https://www.shn.ch" + url
-            datum = f"{m.group(3)}.{m.group(2)}.{m.group(1)}"
+        for titel, url, datum in _parse_shn_liste(hole(PRESSE_SHN_URL)):
             nimm(titel, url, datum, "", "SHN")
     except Exception as e:
         quellen_fehler.append(f"SHN: {e}")
@@ -853,9 +846,11 @@ def hole_presse() -> tuple:
         for e in _parse_feed(hole(PRESSE_GOOGLE_FEED)):
             titel = e["titel"]
             quelle = e["quelle"] or "weitere Medien"
-            # Google haengt die Quelle an den Titel an: "Titel - Quelle"
-            if quelle and titel.endswith(" - " + quelle):
-                titel = titel[: -(len(quelle) + 3)].strip()
+            # Google haengt die Quelle mit wechselnden Trennzeichen an den Titel an
+            if e["quelle"]:
+                titel = re.sub(
+                    r"[\s\-\u2013\u2014|\u00b7]+" + re.escape(e["quelle"]) + r"$",
+                    "", titel).strip()
             nimm(titel, e["url"], e["datum"], _kuerze_anriss(e["anriss"]), quelle)
     except Exception as e:
         quellen_fehler.append(f"Google News: {e}")
@@ -865,7 +860,211 @@ def hole_presse() -> tuple:
         return int(m.group(3) + m.group(2) + m.group(1)) if m else 0
 
     gesammelt.sort(key=lambda e: datum_zahl(e["datum"]), reverse=True)
-    return gesammelt[:PRESSE_MAX], quellen_fehler
+    return gesammelt, quellen_fehler
+
+
+def _parse_shn_liste(html: str) -> list:
+    """Artikel-Links der SHN-Rubrik Neuhausen: [(titel, url, tt.mm.jjjj)]."""
+    soup = BeautifulSoup(html, "html.parser")
+    ergebnis = []
+    for a in soup.find_all("a", href=True):
+        if "/region/neuhausen/" not in a["href"]:
+            continue
+        m = re.search(r"/(\d{4})-(\d{2})-(\d{2})/", a["href"])
+        if not m:
+            continue
+        titel = sauber(a.get_text())
+        if len(titel) < 15:
+            continue  # Navigations- und Weiterlesen-Links ueberspringen
+        url = a["href"]
+        if url.startswith("/"):
+            url = "https://www.shn.ch" + url
+        ergebnis.append((titel, url, f"{m.group(3)}.{m.group(2)}.{m.group(1)}"))
+    return ergebnis
+
+
+def _presse_datum_zahl(d: str) -> int:
+    m = re.match(r"^(\d{2})\.(\d{2})\.(\d{4})$", d or "")
+    return int(m.group(3) + m.group(2) + m.group(1)) if m else 0
+
+
+def _lade_presse_archiv() -> dict:
+    """Bestehendes Archiv aus presse_archiv.js lesen (dient als Zwischenspeicher)."""
+    leer = {"rueckfuellung": False, "eintraege": {}}
+    if not PRESSE_ARCHIV_AUSGABE.exists():
+        return leer
+    try:
+        roh = PRESSE_ARCHIV_AUSGABE.read_text(encoding="utf-8")
+        obj = json.loads(roh[roh.find("{"):roh.rfind("}") + 1])
+        if isinstance(obj, dict) and isinstance(obj.get("eintraege"), dict):
+            obj.setdefault("rueckfuellung", False)
+            return obj
+    except Exception:
+        pass
+    return leer
+
+
+def _hole_lead(url: str) -> str:
+    """Oeffentliche Seitenbeschreibung (og:description) eines Artikels holen."""
+    soup = BeautifulSoup(hole(url), "html.parser")
+    for suche in ({"property": "og:description"}, {"name": "description"}):
+        meta = soup.find("meta", attrs=suche)
+        if meta and meta.get("content"):
+            return _kuerze_anriss(meta["content"])
+    return ""
+
+
+def sammle_rueckfuellung() -> tuple:
+    """Einmaliger Versuch, aeltere Artikel bis PRESSE_RUECKFUELL_AB_JAHR zu holen."""
+    funde = []
+    meldungen = []
+
+    # 1) SHN-Rubrik seitenweise zurueckblaettern
+    try:
+        seiten = 0
+        for seite in range(1, 250):
+            liste = _parse_shn_liste(hole(f"{PRESSE_SHN_URL}?page={seite}"))
+            if not liste:
+                break
+            seiten += 1
+            aelter = False
+            for titel, url, datum in liste:
+                jahr = int(datum[-4:])
+                if jahr >= PRESSE_RUECKFUELL_AB_JAHR:
+                    funde.append({"titel": titel, "url": url, "datum": datum,
+                                  "anriss": "", "quelle": "SHN"})
+                else:
+                    aelter = True
+            if aelter:
+                break
+            time.sleep(0.2)
+        meldungen.append(f"SHN-Archiv: {seiten} Seiten gelesen")
+    except Exception as e:
+        meldungen.append(f"SHN-Archiv abgebrochen: {e}")
+
+    # 2) Google News in Halbjahres-Fenstern
+    try:
+        jahr, fenster = PRESSE_RUECKFUELL_AB_JAHR, 0
+        heute = datetime.now(_ZEITZONE) if _ZEITZONE else datetime.now()
+        while jahr <= heute.year:
+            for start, ende in ((f"{jahr}-01-01", f"{jahr}-07-01"),
+                                (f"{jahr}-07-01", f"{jahr + 1}-01-01")):
+                url = (PRESSE_GOOGLE_FEED
+                       + f"+after:{start}+before:{ende}")
+                for e in _parse_feed(hole(url)):
+                    titel = e["titel"]
+                    if e["quelle"]:
+                        titel = re.sub(
+                            r"[\s\-\u2013\u2014|\u00b7]+" + re.escape(e["quelle"]) + r"$",
+                            "", titel).strip()
+                    funde.append({"titel": titel, "url": e["url"],
+                                  "datum": e["datum"], "anriss": _kuerze_anriss(e["anriss"]),
+                                  "quelle": e["quelle"] or "weitere Medien"})
+                fenster += 1
+                time.sleep(0.2)
+            jahr += 1
+        meldungen.append(f"Google News: {fenster} Zeitfenster abgefragt")
+    except Exception as e:
+        meldungen.append(f"Google News abgebrochen: {e}")
+
+    # 3) Schaffhauser AZ ueber den Such-Feed
+    try:
+        az_seiten = 0
+        for p in range(1, 11):
+            xml = hole(f"https://www.shaz.ch/?s=Neuhausen&feed=rss2&paged={p}")
+            eintraege = _parse_feed(xml)
+            if not eintraege:
+                break
+            az_seiten += 1
+            for e in eintraege:
+                if "neuhausen" not in (e["titel"] + " " + e["anriss"]).lower():
+                    continue
+                funde.append({"titel": e["titel"], "url": e["url"],
+                              "datum": e["datum"], "anriss": e["anriss"],
+                              "quelle": "Schaffhauser AZ"})
+            time.sleep(0.2)
+        meldungen.append(f"Schaffhauser AZ: {az_seiten} Suchseiten gelesen")
+    except Exception as e:
+        meldungen.append(f"Schaffhauser AZ abgebrochen: {e}")
+
+    return funde, meldungen
+
+
+def baue_presse() -> tuple:
+    """
+    Fuehrt alles zusammen: aktuelle Quellen, einmalige Rueckfuellung,
+    dauerhaftes Archiv (presse_archiv.js) und Lead-Texte.
+    Gibt (juengste Eintraege fuer die Seite, fehlerliste) zurueck.
+    """
+    archiv = _lade_presse_archiv()
+    eintraege = archiv["eintraege"]
+    titel_index = {}
+    for s, e in eintraege.items():
+        titel_index[_titel_schluessel(e.get("titel", ""))] = s
+
+    def einpflegen(kandidat):
+        ts = _titel_schluessel(kandidat["titel"])
+        if not ts or not kandidat.get("datum"):
+            return 0
+        if ts in titel_index:
+            vorhanden = eintraege[titel_index[ts]]
+            if not vorhanden.get("anriss") and kandidat.get("anriss"):
+                vorhanden["anriss"] = kandidat["anriss"]
+            return 0
+        s = f"pr|{kandidat['datum']}|{ts}"
+        eintraege[s] = {
+            "schluessel": s, "datum": kandidat["datum"],
+            "titel": kandidat["titel"], "quelle": kandidat["quelle"],
+            "url": kandidat["url"], "anriss": kandidat.get("anriss", ""),
+        }
+        titel_index[ts] = s
+        return 1
+
+    aktuelle, quellen_fehler = hole_presse()
+    neu_aktuell = sum(einpflegen(e) for e in aktuelle)
+
+    if not archiv.get("rueckfuellung"):
+        print("  Presse: einmalige Rueckfuellung bis "
+              f"{PRESSE_RUECKFUELL_AB_JAHR} laeuft (dauert etwas laenger) ...")
+        rueck, meldungen = sammle_rueckfuellung()
+        neu_rueck = sum(einpflegen(e) for e in rueck)
+        for m in meldungen:
+            print(f"    {m}")
+        print(f"    Rueckfuellung: {neu_rueck} zusaetzliche Artikel erfasst")
+        archiv["rueckfuellung"] = True
+
+    # Lead-Texte: fehlende Anrisse einmalig von den Artikelseiten holen
+    geholt = 0
+    for e in eintraege.values():
+        if e.get("anriss") or e.get("lv"):
+            continue
+        if "news.google.com" in e.get("url", ""):
+            e["lv"] = 1  # Google-Umleitungen liefern keine Beschreibung
+            continue
+        if geholt >= PRESSE_LEAD_MAX_PRO_LAUF:
+            continue
+        try:
+            e["anriss"] = _hole_lead(e["url"])
+        except Exception:
+            e["anriss"] = ""
+        e["lv"] = 1
+        geholt += 1
+        time.sleep(0.15)
+
+    js = ("window.NEUHAUSEN_PRESSE_ARCHIV = "
+          + json.dumps(archiv, ensure_ascii=False) + ";\n")
+    PRESSE_ARCHIV_AUSGABE.write_text(js, encoding="utf-8")
+
+    heute = datetime.now(_ZEITZONE) if _ZEITZONE else datetime.now()
+    from datetime import timedelta
+    grenze = int((heute - timedelta(days=PRESSE_ANZEIGE_TAGE)).strftime("%Y%m%d"))
+    alle = sorted(eintraege.values(),
+                  key=lambda e: _presse_datum_zahl(e["datum"]), reverse=True)
+    juengste = [e for e in alle if _presse_datum_zahl(e["datum"]) >= grenze]
+    print(f"  Presse: {len(juengste)} Eintraege auf der Seite, "
+          f"{len(alle) - len(juengste)} im Archiv "
+          f"(neu: {neu_aktuell}, Leads geholt: {geholt})")
+    return juengste, quellen_fehler
 
 
 def main():
@@ -910,12 +1109,14 @@ def main():
         fehler.append(f"Aktuelles: {e}")
         print(f"  Aktuelles         FEHLER: {e}", file=sys.stderr)
 
-    presse, presse_fehler = hole_presse()
-    print(f"  Presse            {len(presse):>3} Eintraege")
-    for pf in presse_fehler:
-        print(f"    Presse-Quelle nicht erreichbar: {pf}", file=sys.stderr)
-    if presse_fehler and not presse:
-        fehler.append("Presse: keine Quelle erreichbar")
+    try:
+        presse, presse_fehler = baue_presse()
+        for pf in presse_fehler:
+            print(f"    Presse-Quelle nicht erreichbar: {pf}", file=sys.stderr)
+        if presse_fehler and not presse:
+            fehler.append("Presse: keine Quelle erreichbar")
+    except Exception as e:
+        print(f"  Presse FEHLER: {e}", file=sys.stderr)
 
     daten = {
         "erzeugt": datetime.now(_ZEITZONE).strftime("%d.%m.%Y %H:%M"),

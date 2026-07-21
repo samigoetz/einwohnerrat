@@ -146,6 +146,7 @@
   td.titel .anriss { display: block; font-size: 12.5px; color: var(--grau); margin-top: 4px; line-height: 1.45; }
   td.art-zelle { font-size: 12.5px; }
   td.quelle-zelle { white-space: nowrap; }
+  .pr-mehr-zeile { margin-top: 16px; display: flex; align-items: center; gap: 12px; }
   .quelle-badge {
     display: inline-block; font-size: 11px; font-weight: 700;
     padding: 3px 9px; background: var(--grau-hell); color: var(--schwarz);
@@ -494,6 +495,10 @@
         <tr><td colspan="3" class="leer">Wird geladen …</td></tr>
       </tbody>
     </table>
+    <div class="pr-mehr-zeile">
+      <button class="chip" id="pr-mehr">Ältere Artikel laden</button>
+      <span class="vt-status" id="pr-mehr-status"></span>
+    </div>
   </section>
 
   <footer>
@@ -510,7 +515,8 @@
       Texterkennung erfasst. Der Bereich <b>Presse</b> listet Artikel regionaler
       und überregionaler Medien mit Neuhausen-Bezug; verlinkt werden Titel und
       Kurzanriss, gelesen wird der Artikel beim jeweiligen Medium (teils Abo nötig),
-      ohne Gewähr auf Vollständigkeit. Die Fraktionszuordnungen wurden manuell
+      ohne Gewähr auf Vollständigkeit; das Archiv reicht, soweit die Medien es
+      hergeben, bis 2020 zurück. Die Fraktionszuordnungen wurden manuell
       erstellt, Fehler sind möglich.
     </p>
     <p>Markierungen zurücksetzen? <button class="reset" id="reset">Gespeicherten Lesestand löschen</button></p>
@@ -562,6 +568,30 @@
     "GPK":         ["#1D1D1B", "#FFFFFF"],
     "Volksmotion": ["#555555", "#FFFFFF"]
   };
+
+  // Feste Farben fuer die wichtigsten Medien; alle weiteren Quellen erhalten
+  // automatisch eine stabile Farbe aus der Palette (immer dieselbe pro Name).
+  var QUELLE_FARBEN = {
+    "SHN":             ["#14557B", "#FFFFFF"],
+    "Schaffhauser AZ": ["#8E1B3A", "#FFFFFF"],
+    "Schaffhausen24":  ["#2F7D4F", "#FFFFFF"],
+    "Tages-Anzeiger":  ["#1D1D1B", "#FFFFFF"],
+    "SRF":             ["#7A0010", "#FFFFFF"],
+    "Top Online":      ["#C77500", "#FFFFFF"],
+    "NZZ":             ["#3D3D3D", "#FFFFFF"],
+    "20 Minuten":      ["#0B5FA5", "#FFFFFF"],
+    "Blick":           ["#B00000", "#FFFFFF"]
+  };
+  var QUELLE_PALETTE = [
+    "#5B4E9E", "#3E7C7B", "#A05517", "#5F7A1F", "#7C3A6B",
+    "#2E6DA4", "#8A6D2F", "#4E6E58", "#94402F", "#54617A"
+  ];
+  function quelleFarbe(name) {
+    if (QUELLE_FARBEN[name]) return QUELLE_FARBEN[name];
+    var h = 0;
+    for (var i = 0; i < name.length; i++) { h = (h * 31 + name.charCodeAt(i)) >>> 0; }
+    return [QUELLE_PALETTE[h % QUELLE_PALETTE.length], "#FFFFFF"];
+  }
 
   var AKTUELLES_URL = "https://neuhausen.ch/aktuelles";
 
@@ -1046,6 +1076,11 @@
         tdQ.className = "quelle-zelle";
         var qb = document.createElement("span");
         qb.className = "quelle-badge"; qb.textContent = e.quelle || "\u2013";
+        if (e.quelle) {
+          var qf = quelleFarbe(e.quelle);
+          qb.style.background = qf[0];
+          qb.style.color = qf[1];
+        }
         tdQ.appendChild(qb);
         tr.appendChild(tdQ);
 
@@ -1053,6 +1088,44 @@
       });
     }
     $("tabzahl-pr").textContent = "(" + prEintraege.length + ")";
+  }
+
+  // ---- Presse-Archiv: aeltere Artikel erst auf Klick nachladen -----------------
+  var prArchivZustand = "aus"; // aus | laedt | geladen | fehler
+  function ladePresseArchiv() {
+    if (prArchivZustand === "laedt" || prArchivZustand === "geladen") return;
+    prArchivZustand = "laedt";
+    $("pr-mehr-status").textContent = "l\u00e4dt \u2026";
+    var s = document.createElement("script");
+    s.src = "presse_archiv.js?v=" + Date.now();
+    s.onload = function () {
+      var obj = window.NEUHAUSEN_PRESSE_ARCHIV;
+      if (!obj || !obj.eintraege) {
+        prArchivZustand = "fehler";
+        $("pr-mehr-status").textContent = "Archiv nicht verf\u00fcgbar";
+        return;
+      }
+      var vorhanden = {};
+      prEintraege.forEach(function (e) { vorhanden[e.schluessel] = true; });
+      var dazu = 0;
+      for (var k in obj.eintraege) {
+        var e = obj.eintraege[k];
+        if (!e || vorhanden[e.schluessel]) continue;
+        e.datumZ = datumZahl(e.datum);
+        e._neu = false;
+        prEintraege.push(e);
+        dazu++;
+      }
+      prArchivZustand = "geladen";
+      $("pr-mehr").style.display = "none";
+      $("pr-mehr-status").textContent = "(" + dazu + " \u00e4ltere Artikel geladen)";
+      renderePR();
+    };
+    s.onerror = function () {
+      prArchivZustand = "fehler";
+      $("pr-mehr-status").textContent = "Archiv nicht verf\u00fcgbar";
+    };
+    document.body.appendChild(s);
   }
 
   // ---- Rendering: Statistik ----------------------------------------------------
@@ -1425,6 +1498,8 @@
   mobilSortVerdrahten("sort-p", pSort, rendereBP);
   mobilSortVerdrahten("sort-a", aSort, rendereAK);
   mobilSortVerdrahten("sort-pr", prSort, renderePR);
+
+  $("pr-mehr").addEventListener("click", ladePresseArchiv);
 
   function volltextSchalter(id, schluessel, renderFn) {
     $(id).addEventListener("change", function () {
