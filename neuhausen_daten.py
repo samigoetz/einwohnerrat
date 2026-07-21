@@ -51,7 +51,7 @@ PRESSE_LEAD_MAX_PRO_LAUF = 40    # so viele fehlende Leads werden pro Lauf gehol
 PRESSE_RUECKFUELL_AB_JAHR = 2020
 KENNZAHLEN_AUSGABE = BASIS / "kennzahlen.js"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 5          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 6          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -1229,13 +1229,19 @@ def _stattab_reihe(cube: str, festlegungen: list,
     jahr_von_pos = {p: str(labels.get(c, c))[:4]
                     for c, p in index.items()}
     summe = {}
+    gesehen = set()
     for flach, w in enumerate(werte):
-        if w is None:
-            continue
         zpos = koordinate(flach)[zeit_pos_von_id]
         jahr = jahr_von_pos.get(zpos)
-        if jahr and re.match(r"^\d{4}$", jahr):
+        if not (jahr and re.match(r"^\d{4}$", jahr)):
+            continue
+        if isinstance(w, (int, float)):
             summe[jahr] = summe.get(jahr, 0) + w
+            gesehen.add(jahr)
+        # Strings wie "..." (Daten nicht verfuegbar) oder None -> ignorieren
+
+    # Nur Jahre mit mindestens einem echten Wert behalten
+    summe = {j: v for j, v in summe.items() if j in gesehen}
 
     reihe = sorted(summe.items(), key=lambda kv: int(kv[0]))
     if not reihe:
@@ -1286,13 +1292,21 @@ def baue_kennzahlen() -> None:
         })
 
     # --- Bevoelkerung (BFS, demografische Bilanz je Gemeinde) ---
+    # Der Wuerfel schluesselt nach Staatsangehoerigkeit (Einzellaender + Total)
+    # und Geschlecht auf. Wir erzwingen ueberall das Total, sonst werden
+    # Kategorien addiert und die Zahl zu hoch (frueher 11'834 statt ~10'500).
+    BEV_FEST = {
+        "Staatsangehörigkeit (Kategorie)": ["staatsangehörigkeit - total", "total"],
+        "Geschlecht": ["geschlecht - total", "total"],
+        "Demografische Komponente": ["bestand am 31. dezember"],
+    }
     try:
         reihe, url = _stattab_reihe(
-            "px-x-0102020000_201", ["bestand am 31. dezember"])
+            "px-x-0102020000_201", [], fest=BEV_FEST)
         karte("Bevölkerung", "Ständige Wohnbevölkerung", "Personen",
               reihe, "BFS, STAT-TAB", url)
         print(f"  Kennzahlen: Bevoelkerung {reihe[0][0]}\u2013{reihe[-1][0]} "
-              f"({len(reihe)} Werte)")
+              f"({len(reihe)} Werte, aktuell {reihe[-1][1]})")
     except Exception as e:
         fehler.append(f"Bevoelkerung: {e}")
 
@@ -1308,21 +1322,26 @@ def baue_kennzahlen() -> None:
             fehler.append(f"{name}: {e}")
 
     # --- Ausländer:innenanteil (BFS, ständige Wohnbevölkerung) ---
-    # Zaehler (Ausland) und Nenner (Schweiz + Ausland) aus DEMSELBEN Wuerfel
-    # und DERSELBEN Bevoelkerungstyp-Kategorie, sonst verzerrt (frueher 53 %).
+    # Der Wuerfel kennt KEINE Sammelkategorie "Ausland", sondern nur
+    # "Staatsangehörigkeit - Total", "Schweiz" und einzelne Laender.
+    # Ausland = Total - Schweiz. Beides aus derselben ständigen
+    # Wohnbevoelkerung, damit Zaehler und Nenner konsistent sind.
     try:
         typ = {"Bevölkerungstyp": ["ständige wohnbevölkerung", "ständige"]}
-        ausland, url = _stattab_reihe(
-            "px-x-0102010000_104", ["ausland"], fest=typ)
+        sa = "Staatsangehörigkeit (Kategorie)"
+        total, url = _stattab_reihe(
+            "px-x-0102010000_104", [],
+            fest={**typ, sa: ["staatsangehörigkeit - total", "total"]})
         schweiz, _ = _stattab_reihe(
-            "px-x-0102010000_104", ["schweiz"], fest=typ)
+            "px-x-0102010000_104", [],
+            fest={**typ, sa: ["schweiz"]})
         ch = dict(schweiz)
         reihe = []
-        for jahr, aus in ausland:
+        for jahr, tot in total:
             heimisch = ch.get(jahr)
-            tot = (heimisch or 0) + (aus or 0)
-            if tot and aus is not None:
-                reihe.append((jahr, round(aus / tot * 100, 1)))
+            if tot and heimisch is not None:
+                auslaender = tot - heimisch
+                reihe.append((jahr, round(auslaender / tot * 100, 1)))
         if reihe:
             karte("Bevölkerung", "Ausländer:innenanteil", "%",
                   reihe, "BFS, STAT-TAB", url)
@@ -1332,14 +1351,22 @@ def baue_kennzahlen() -> None:
         fehler.append(f"Ausländer:innenanteil: {e}")
 
     # --- Wohnen (BFS: Leerwohnungen, Neubau) ---
+    # Der Wuerfel hat Dimensionen "Anzahl Wohnräume" (Total),
+    # "Leerwohnung (Typ)" (Total) und "Anzahl/Anteil" (Ziffer waehlen).
+    # Kleine Gemeinden koennen in einzelnen Jahren "..." statt Zahlen liefern;
+    # solche Jahre werden uebersprungen statt den ganzen Abruf zu sprengen.
     try:
         reihe, url = _stattab_reihe(
-            "px-x-0902020300_101",
-            ["leerwohnungsziffer", "ziffer", "anteil", "%"])
+            "px-x-0902020300_101", [],
+            fest={
+                "Anzahl Wohnräume": ["anzahl wohnräume - total", "total"],
+                "Leerwohnung (Typ)": ["leerwohnung (typ) - total", "total"],
+                "Anzahl/Anteil": ["leerwohnungsziffer", "ziffer", "anteil"],
+            })
         karte("Wohnen", "Leerwohnungsziffer", "%",
               reihe, "BFS, STAT-TAB", url)
         print(f"  Kennzahlen: Leerwohnungsziffer {reihe[0][0]}\u2013"
-              f"{reihe[-1][0]} ({len(reihe)} Werte)")
+              f"{reihe[-1][0]} ({len(reihe)} Werte, aktuell {reihe[-1][1]}%)")
     except Exception as e:
         fehler.append(f"Leerwohnungsziffer: {e}")
     try:
@@ -1354,11 +1381,11 @@ def baue_kennzahlen() -> None:
         fehler.append(f"Neu erstellte Wohnungen: {e}")
 
     # --- Vergleich mit Kanton und Schweiz (Wachstum in Prozent) ---
-    for name, cube, festl, ab_jahr in (
+    for name, cube, festl, festd, ab_jahr in (
             ("Bevölkerungswachstum seit 2015",
-             "px-x-0102020000_201", ["bestand am 31. dezember"], 2015),
+             "px-x-0102020000_201", [], BEV_FEST, 2015),
             ("Beschäftigungswachstum seit 2011",
-             "px-x-0602010000_102", ["beschäftigte"], 2011)):
+             "px-x-0602010000_102", ["beschäftigte"], None, 2011)):
         try:
             werte = []
             url = ""
@@ -1366,7 +1393,8 @@ def baue_kennzahlen() -> None:
                                   ("Kanton SH", "- schaffhausen"),
                                   ("Schweiz", "schweiz")):
                 try:
-                    reihe, url = _stattab_reihe(cube, festl, region=region)
+                    reihe, url = _stattab_reihe(cube, festl, region=region,
+                                                fest=festd)
                     w = _wachstum(reihe, ab_jahr)
                     if w is not None:
                         werte.append([label, w])
