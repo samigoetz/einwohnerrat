@@ -41,6 +41,11 @@ VORSTOSS_QUELLEN = [
 BA_URL = "https://neuhausen.ch/berichte_antraege"
 BP_URL = "https://neuhausen.ch/beschluesse_protokolle"
 AKTUELLES_URL = "https://neuhausen.ch/aktuelles"
+PRESSE_SHN_URL = "https://www.shn.ch/region/neuhausen"
+PRESSE_SHAZ_FEED = "https://www.shaz.ch/feed/"
+PRESSE_GOOGLE_FEED = ("https://news.google.com/rss/search?"
+                      "q=%22Neuhausen+am+Rheinfall%22&hl=de-CH&gl=CH&ceid=CH:de")
+PRESSE_MAX = 80
 FEED_AUSGABE = BASIS / "feed.xml"
 VOLLTEXT_AUSGABE = BASIS / "volltext.js"
 VOLLTEXT_MAX_ZEICHEN = 150000   # Textobergrenze pro Dokument
@@ -591,7 +596,7 @@ def _rfc822(datum: str) -> str:
             f"{_MONATE[dt.month - 1]} {dt.year} 12:00:00 {offset}")
 
 
-def baue_feed(vorstoesse: list, berichte: list, beschluesse: list, aktuelles: list) -> str:
+def baue_feed(vorstoesse: list, berichte: list, beschluesse: list, aktuelles: list, presse: list) -> str:
     """Erzeugt einen RSS-2.0-Feed mit den neuesten Eintraegen aller Bereiche."""
     from xml.sax.saxutils import escape
 
@@ -619,6 +624,11 @@ def baue_feed(vorstoesse: list, berichte: list, beschluesse: list, aktuelles: li
         eintraege.append({
             "titel": f"[Aktuelles] {a['titel']}",
             "url": AKTUELLES_URL, "datum": a["datum"], "id": a["schluessel"],
+        })
+    for p in presse:
+        eintraege.append({
+            "titel": f"[Presse \u00b7 {p['quelle']}] {p['titel']}",
+            "url": p["url"], "datum": p["datum"], "id": p["schluessel"],
         })
 
     eintraege.sort(key=lambda e: datum_zahl(e["datum"]), reverse=True)
@@ -709,11 +719,161 @@ def parse_aktuelles(html: str) -> list:
     return ergebnis
 
 
+# ---------------------------------------------------------------------------
+# Presse: Artikel ueber Neuhausen aus regionalen Medien.
+# Quellen: SHN-Rubrik Neuhausen (HTML), Schaffhauser AZ (RSS),
+# Google News (RSS, Auffangnetz fuer weitere Medien).
+# Es werden nur Titel, Datum, Anriss und Link uebernommen; gelesen wird
+# beim jeweiligen Medium.
+# ---------------------------------------------------------------------------
+
+def _titel_schluessel(titel: str) -> str:
+    """Normalisierter Titel fuer den Dubletten-Abgleich zwischen Quellen."""
+    t = unicodedata.normalize("NFKD", titel or "").lower()
+    t = re.sub(r"[^a-z0-9]+", "", t)
+    return t[:60]
+
+
+def _datum_aus_text(wert: str) -> str:
+    """RFC-822- oder ISO-Datum zu tt.mm.jjjj (Schweizer Zeit)."""
+    wert = (wert or "").strip()
+    if not wert:
+        return ""
+    try:
+        from email.utils import parsedate_to_datetime
+        dt = parsedate_to_datetime(wert)
+    except Exception:
+        try:
+            dt = datetime.fromisoformat(wert.replace("Z", "+00:00"))
+        except Exception:
+            return ""
+    try:
+        if dt.tzinfo is not None and _ZEITZONE is not None:
+            dt = dt.astimezone(_ZEITZONE)
+    except Exception:
+        pass
+    return dt.strftime("%d.%m.%Y")
+
+
+def _kuerze_anriss(text: str, laenge: int = 240) -> str:
+    text = sauber(re.sub(r"<[^>]+>", " ", text or ""))
+    if len(text) > laenge:
+        text = text[:laenge].rsplit(" ", 1)[0] + " \u2026"
+    return text
+
+
+def _parse_feed(xml_text: str) -> list:
+    """Minimaler RSS-2.0- und Atom-Parser (ohne Zusatzbibliotheken)."""
+    import xml.etree.ElementTree as ET
+    try:
+        wurzel = ET.fromstring(xml_text.encode("utf-8")
+                               if isinstance(xml_text, str) else xml_text)
+    except Exception:
+        return []
+
+    def lokal(tag):
+        return tag.rsplit("}", 1)[-1]
+
+    eintraege = []
+    for item in wurzel.iter():
+        if lokal(item.tag) not in ("item", "entry"):
+            continue
+        titel, url, datum, anriss, quelle = "", "", "", "", ""
+        for kind in item:
+            name = lokal(kind.tag)
+            text = (kind.text or "").strip()
+            if name == "title":
+                titel = sauber(text)
+            elif name == "link":
+                url = text or kind.get("href", "")
+            elif name in ("pubDate", "published", "updated") and not datum:
+                datum = _datum_aus_text(text)
+            elif name in ("description", "summary") and not anriss:
+                anriss = _kuerze_anriss(text)
+            elif name == "source":
+                quelle = sauber(text)
+        if titel and url:
+            eintraege.append({"titel": titel, "url": url.strip(),
+                              "datum": datum, "anriss": anriss,
+                              "quelle": quelle})
+    return eintraege
+
+
+def hole_presse() -> tuple:
+    """Sammelt Presseartikel; gibt (eintraege, quellen_fehler) zurueck."""
+    gesammelt = []
+    gesehen = set()
+    quellen_fehler = []
+
+    def nimm(titel, url, datum, anriss, quelle):
+        ts = _titel_schluessel(titel)
+        if not ts or ts in gesehen or not datum:
+            return
+        gesehen.add(ts)
+        gesammelt.append({
+            "schluessel": f"pr|{datum}|{ts}",
+            "datum": datum,
+            "titel": titel,
+            "quelle": quelle,
+            "url": url,
+            "anriss": anriss,
+        })
+
+    # 1) SHN, Rubrik Neuhausen (Datum steckt im Artikel-Link)
+    try:
+        soup = BeautifulSoup(hole(PRESSE_SHN_URL), "html.parser")
+        for a in soup.find_all("a", href=True):
+            if "/region/neuhausen/" not in a["href"]:
+                continue
+            m = re.search(r"/(\d{4})-(\d{2})-(\d{2})/", a["href"])
+            if not m:
+                continue
+            titel = sauber(a.get_text())
+            if len(titel) < 15:
+                continue  # Navigations- und Weiterlesen-Links ueberspringen
+            url = a["href"]
+            if url.startswith("/"):
+                url = "https://www.shn.ch" + url
+            datum = f"{m.group(3)}.{m.group(2)}.{m.group(1)}"
+            nimm(titel, url, datum, "", "SHN")
+    except Exception as e:
+        quellen_fehler.append(f"SHN: {e}")
+
+    # 2) Schaffhauser AZ (RSS), gefiltert auf Neuhausen
+    try:
+        for e in _parse_feed(hole(PRESSE_SHAZ_FEED)):
+            if "neuhausen" not in (e["titel"] + " " + e["anriss"]).lower():
+                continue
+            nimm(e["titel"], e["url"], e["datum"], e["anriss"], "Schaffhauser AZ")
+    except Exception as e:
+        quellen_fehler.append(f"Schaffhauser AZ: {e}")
+
+    # 3) Google News als Auffangnetz (weitere Medien)
+    try:
+        for e in _parse_feed(hole(PRESSE_GOOGLE_FEED)):
+            titel = e["titel"]
+            quelle = e["quelle"] or "weitere Medien"
+            # Google haengt die Quelle an den Titel an: "Titel - Quelle"
+            if quelle and titel.endswith(" - " + quelle):
+                titel = titel[: -(len(quelle) + 3)].strip()
+            nimm(titel, e["url"], e["datum"], _kuerze_anriss(e["anriss"]), quelle)
+    except Exception as e:
+        quellen_fehler.append(f"Google News: {e}")
+
+    def datum_zahl(d):
+        m = re.match(r"^(\d{2})\.(\d{2})\.(\d{4})$", d)
+        return int(m.group(3) + m.group(2) + m.group(1)) if m else 0
+
+    gesammelt.sort(key=lambda e: datum_zahl(e["datum"]), reverse=True)
+    return gesammelt[:PRESSE_MAX], quellen_fehler
+
+
 def main():
     vorstoesse = []
     berichte = []
     beschluesse = []
     aktuelles = []
+    presse = []
     fehler = []
 
     for quelle in VORSTOSS_QUELLEN:
@@ -750,6 +910,13 @@ def main():
         fehler.append(f"Aktuelles: {e}")
         print(f"  Aktuelles         FEHLER: {e}", file=sys.stderr)
 
+    presse, presse_fehler = hole_presse()
+    print(f"  Presse            {len(presse):>3} Eintraege")
+    for pf in presse_fehler:
+        print(f"    Presse-Quelle nicht erreichbar: {pf}", file=sys.stderr)
+    if presse_fehler and not presse:
+        fehler.append("Presse: keine Quelle erreichbar")
+
     daten = {
         "erzeugt": datetime.now(_ZEITZONE).strftime("%d.%m.%Y %H:%M"),
         "fehler": fehler,
@@ -757,6 +924,7 @@ def main():
         "berichte": berichte,
         "beschluesse": beschluesse,
         "aktuelles": aktuelles,
+        "presse": presse,
     }
 
     if UNBEKANNTE_PERSONEN:
@@ -768,7 +936,7 @@ def main():
     js = "window.NEUHAUSEN_DATEN = " + json.dumps(daten, ensure_ascii=False) + ";\n"
     AUSGABE.write_text(js, encoding="utf-8")
 
-    feed = baue_feed(vorstoesse, berichte, beschluesse, aktuelles)
+    feed = baue_feed(vorstoesse, berichte, beschluesse, aktuelles, presse)
     FEED_AUSGABE.write_text(feed, encoding="utf-8")
 
     if "--ohne-volltext" not in sys.argv:
@@ -781,7 +949,8 @@ def main():
 
     print(f"Geschrieben: {AUSGABE}  "
           f"({len(vorstoesse)} Vorstoesse, {len(berichte)} Berichte, "
-          f"{len(beschluesse)} Beschluesse, {len(aktuelles)} Aktuelles)")
+          f"{len(beschluesse)} Beschluesse, {len(aktuelles)} Aktuelles, "
+          f"{len(presse)} Presse)")
     print(f"Geschrieben: {FEED_AUSGABE}")
 
     if fehler and not vorstoesse and not berichte:
