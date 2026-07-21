@@ -51,7 +51,7 @@ PRESSE_LEAD_MAX_PRO_LAUF = 40    # so viele fehlende Leads werden pro Lauf gehol
 PRESSE_RUECKFUELL_AB_JAHR = 2020
 KENNZAHLEN_AUSGABE = BASIS / "kennzahlen.js"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 4          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 5          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -1083,22 +1083,26 @@ _STATTAB_META = {}
 
 
 def _stattab_reihe(cube: str, festlegungen: list,
-                   region: str = "neuhausen am rheinfall") -> tuple:
+                   region: str = "neuhausen am rheinfall",
+                   fest: dict = None, summiere: list = None) -> tuple:
     """
     Zeitreihe fuer Neuhausen am Rheinfall aus einem STAT-TAB-Datenwuerfel.
     Liest zuerst die Struktur des Wuerfels und waehlt dann:
       - die Gemeinde Neuhausen am Rheinfall,
       - alle Jahre,
-      - pro uebriger Dimension den Wert gemaess `festlegungen`
-        (Liste von Suchbegriffen) oder einen Total-Wert.
+      - pro uebriger Dimension den Wert gemaess `fest` (dict: code->begriffe),
+        sonst `festlegungen` (Liste von Suchbegriffen), sonst ein Total.
     Lieber gar keine Zahl als eine falsche: Ohne eindeutige Auswahl
     wird abgebrochen.
     Gibt ([(jahr, wert), ...], quellen_url) zurueck.
     """
+    fest = fest or {}
+    summiere = [s.lower() for s in (summiere or [])]
     basis = f"{STATTAB_BASIS}/{cube}/{cube}.px"
     if cube not in _STATTAB_META:
-        _STATTAB_META[cube] = requests.get(
-            basis, headers=HEADERS, timeout=60).json()
+        r = requests.get(basis, headers=HEADERS, timeout=60)
+        r.raise_for_status()
+        _STATTAB_META[cube] = r.json()
     meta = _STATTAB_META[cube]
 
     def wahl(texte, begriffe):
@@ -1145,6 +1149,21 @@ def _stattab_reihe(cube: str, festlegungen: list,
                             "selection": {"filter": "item",
                                           "values": [var["values"][i]]}})
             continue
+        # gezielte Festlegung einzelner Dimensionen (code -> Suchbegriffe)
+        if code in fest:
+            i = wahl(texte, fest[code])
+            if i is None:
+                raise RuntimeError(f"{cube}: Festlegung '{fest[code]}' "
+                                   f"nicht gefunden in '{code}'")
+            abfrage.append({"code": code,
+                            "selection": {"filter": "item",
+                                          "values": [var["values"][i]]}})
+            continue
+        # Dimension ueber alle Werte summieren (z. B. Gebaeudetyp ohne Total)
+        if code.lower() in summiere:
+            abfrage.append({"code": code,
+                            "selection": {"filter": "all", "values": ["*"]}})
+            continue
         i = wahl(texte, festlegungen)
         if i is not None:
             abfrage.append({"code": code,
@@ -1179,20 +1198,46 @@ def _stattab_reihe(cube: str, festlegungen: list,
             break
     if zeit_id is None:
         zeit_id = ids[-1]
+
+    # Groessen aller Dimensionen in Reihenfolge (json-stat ist zeilen-major)
+    groessen = []
+    for dim_id in ids:
+        kat = dims[dim_id]["category"]
+        idx = kat.get("index")
+        if isinstance(idx, list):
+            groessen.append(len(idx))
+        else:
+            groessen.append(len(idx))
+    werte = js["value"]
+
     kat = dims[zeit_id]["category"]
     index = kat.get("index")
     labels = kat.get("label", {})
     if isinstance(index, list):
         index = {c: p for p, c in enumerate(index)}
-    werte = js["value"]
+    zeit_pos_von_id = ids.index(zeit_id)
 
-    reihe = []
-    for codewert, pos in sorted(index.items(), key=lambda kv: kv[1]):
-        if pos >= len(werte) or werte[pos] is None:
+    # Fuer jede Zelle die Zeit-Koordinate bestimmen und Werte je Jahr summieren.
+    def koordinate(flach):
+        koords = []
+        rest = flach
+        for g in reversed(groessen):
+            koords.append(rest % g)
+            rest //= g
+        return list(reversed(koords))
+
+    jahr_von_pos = {p: str(labels.get(c, c))[:4]
+                    for c, p in index.items()}
+    summe = {}
+    for flach, w in enumerate(werte):
+        if w is None:
             continue
-        jahr = str(labels.get(codewert, codewert))[:4]
-        if re.match(r"^\d{4}$", jahr):
-            reihe.append((jahr, werte[pos]))
+        zpos = koordinate(flach)[zeit_pos_von_id]
+        jahr = jahr_von_pos.get(zpos)
+        if jahr and re.match(r"^\d{4}$", jahr):
+            summe[jahr] = summe.get(jahr, 0) + w
+
+    reihe = sorted(summe.items(), key=lambda kv: int(kv[0]))
     if not reihe:
         raise RuntimeError(f"{cube}: leere Zeitreihe")
     return reihe, f"{STATTAB_SEITE}/{cube}/-/{cube}.px/"
@@ -1262,32 +1307,35 @@ def baue_kennzahlen() -> None:
         except Exception as e:
             fehler.append(f"{name}: {e}")
 
-    # --- Auslaenderanteil (BFS, staendige Wohnbevoelkerung) ---
+    # --- Ausländer:innenanteil (BFS, ständige Wohnbevölkerung) ---
+    # Zaehler (Ausland) und Nenner (Schweiz + Ausland) aus DEMSELBEN Wuerfel
+    # und DERSELBEN Bevoelkerungstyp-Kategorie, sonst verzerrt (frueher 53 %).
     try:
+        typ = {"Bevölkerungstyp": ["ständige wohnbevölkerung", "ständige"]}
         ausland, url = _stattab_reihe(
-            "px-x-0102010000_104",
-            ["ausland", "ständige wohnbevölkerung", "bestand"])
+            "px-x-0102010000_104", ["ausland"], fest=typ)
         schweiz, _ = _stattab_reihe(
-            "px-x-0102010000_104",
-            ["schweiz", "ständige wohnbevölkerung", "bestand"])
+            "px-x-0102010000_104", ["schweiz"], fest=typ)
         ch = dict(schweiz)
         reihe = []
         for jahr, aus in ausland:
-            tot = (ch.get(jahr) or 0) + (aus or 0)
-            if tot:
+            heimisch = ch.get(jahr)
+            tot = (heimisch or 0) + (aus or 0)
+            if tot and aus is not None:
                 reihe.append((jahr, round(aus / tot * 100, 1)))
         if reihe:
-            karte("Bevölkerung", "Ausländeranteil", "%",
+            karte("Bevölkerung", "Ausländer:innenanteil", "%",
                   reihe, "BFS, STAT-TAB", url)
             print(f"  Kennzahlen: Auslaenderanteil {reihe[0][0]}\u2013"
-                  f"{reihe[-1][0]} ({len(reihe)} Werte)")
+                  f"{reihe[-1][0]} ({len(reihe)} Werte, aktuell {reihe[-1][1]}%)")
     except Exception as e:
-        fehler.append(f"Auslaenderanteil: {e}")
+        fehler.append(f"Ausländer:innenanteil: {e}")
 
     # --- Wohnen (BFS: Leerwohnungen, Neubau) ---
     try:
         reihe, url = _stattab_reihe(
-            "px-x-0902020300_101", ["ziffer", "anteil"])
+            "px-x-0902020300_101",
+            ["leerwohnungsziffer", "ziffer", "anteil", "%"])
         karte("Wohnen", "Leerwohnungsziffer", "%",
               reihe, "BFS, STAT-TAB", url)
         print(f"  Kennzahlen: Leerwohnungsziffer {reihe[0][0]}\u2013"
@@ -1295,7 +1343,9 @@ def baue_kennzahlen() -> None:
     except Exception as e:
         fehler.append(f"Leerwohnungsziffer: {e}")
     try:
-        reihe, url = _stattab_reihe("px-x-0904030000_103", [])
+        # Gebaeudetyp hat kein Total -> ueber alle Typen summieren
+        reihe, url = _stattab_reihe(
+            "px-x-0904030000_103", [], summiere=["gebäudetyp"])
         karte("Wohnen", "Neu erstellte Wohnungen", "Wohnungen",
               reihe, "BFS, STAT-TAB", url)
         print(f"  Kennzahlen: Neubau-Wohnungen {reihe[0][0]}\u2013"
@@ -1369,14 +1419,14 @@ def baue_kennzahlen() -> None:
         if absolut:
             karte("Bevölkerung", "Stimmberechtigte", "Personen",
                   absolut, "BFS, STAT-TAB (Nationalratswahlen)", url,
-                  "Schweizer Staatsangehörige ab 18 Jahren")
+                  "Schweizer:innen ab 18 Jahren")
         if quote:
             karte("Bevölkerung", "Anteil Stimmberechtigte", "%",
                   quote, "BFS, STAT-TAB", url,
                   "Anteil an der Gesamtbevölkerung. Stimmberechtigt sind nur "
                   "Schweizer:innen ab 18 Jahren; der Wert widerspiegelt daher "
-                  "auch den Anteil Minderjähriger und den Ausländeranteil "
-                  "(in Neuhausen rund 40 %).")
+                  "auch den Anteil Minderjähriger und den Ausländer:innenanteil "
+                  "(in Neuhausen rund 46 %).")
             print(f"  Kennzahlen: Anteil Stimmberechtigte {quote[0][0]}\\u2013"
                   f"{quote[-1][0]} ({len(quote)} Werte)")
     except Exception as e:
