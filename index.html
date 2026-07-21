@@ -269,6 +269,18 @@
   .kz-delta { font-size: 12px; font-weight: 600; color: var(--grau); margin-top: 5px; }
   .kz-spark { margin-top: 10px; }
   .kz-spark svg { display: block; width: 100%; height: 40px; }
+  .kz-vgl { margin-top: 4px; }
+  .kz-vgl-zeile {
+    display: grid; grid-template-columns: 86px 1fr 62px;
+    gap: 10px; align-items: center; padding: 5px 0;
+  }
+  .kz-vgl-zeile .lab { font-size: 12px; font-weight: 700; }
+  .kz-vgl-zeile .balken { height: 16px; background: var(--grau-hell); }
+  .kz-vgl-zeile .balken > div { height: 100%; }
+  .kz-vgl-zeile .wert {
+    font-size: 12.5px; font-weight: 800; text-align: right;
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
   .kz-quelle { font-size: 10.5px; color: var(--grau); margin-top: 9px; line-height: 1.5; }
   .kz-quelle a { color: var(--rot); font-weight: 600; text-decoration: none; }
   .kz-quelle a:hover { text-decoration: underline; }
@@ -1218,6 +1230,49 @@
         var name = document.createElement("div");
         name.className = "kz-name"; name.textContent = k.name;
         karte.appendChild(name);
+        if (k.typ === "vergleich") {
+          var farben = ["#E2001A", "#6E6E6E", "#B5B5B2"];
+          var vgl = document.createElement("div");
+          vgl.className = "kz-vgl";
+          var maxAbs = 1;
+          (k.werte || []).forEach(function (w) {
+            maxAbs = Math.max(maxAbs, Math.abs(w[1]));
+          });
+          (k.werte || []).forEach(function (w, idx) {
+            var z = document.createElement("div");
+            z.className = "kz-vgl-zeile";
+            var lab = document.createElement("div");
+            lab.className = "lab"; lab.textContent = w[0];
+            z.appendChild(lab);
+            var bal = document.createElement("div");
+            bal.className = "balken";
+            var fuell = document.createElement("div");
+            fuell.style.width = Math.max(2, Math.abs(w[1]) / maxAbs * 100) + "%";
+            fuell.style.background = farben[idx % farben.length];
+            bal.appendChild(fuell);
+            z.appendChild(bal);
+            var wt = document.createElement("div");
+            wt.className = "wert";
+            wt.textContent = (w[1] > 0 ? "+" : "") + kzZahl(w[1]) + " %";
+            z.appendChild(wt);
+            vgl.appendChild(z);
+          });
+          karte.appendChild(vgl);
+          var vq = document.createElement("div");
+          vq.className = "kz-quelle";
+          var vqa = document.createElement("a");
+          vqa.href = k.quelleUrl || "#"; vqa.target = "_blank"; vqa.rel = "noopener";
+          vqa.textContent = k.quelle || "Quelle";
+          vq.appendChild(document.createTextNode("Quelle: "));
+          vq.appendChild(vqa);
+          if (k.hinweis) {
+            vq.appendChild(document.createElement("br"));
+            vq.appendChild(document.createTextNode(k.hinweis));
+          }
+          karte.appendChild(vq);
+          raster.appendChild(karte);
+          return;
+        }
         var reihe = k.reihe || [];
         var letzte = reihe[reihe.length - 1];
         var wert = document.createElement("div");

@@ -51,6 +51,7 @@ PRESSE_LEAD_MAX_PRO_LAUF = 40    # so viele fehlende Leads werden pro Lauf gehol
 PRESSE_RUECKFUELL_AB_JAHR = 2020
 KENNZAHLEN_AUSGABE = BASIS / "kennzahlen.js"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
+KENNZAHLEN_VERSION = 2          # bei Ausbau erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -1078,7 +1079,11 @@ def baue_presse() -> tuple:
 # Ergebnis: kennzahlen.js, hoechstens einmal pro Woche neu abgefragt.
 # ---------------------------------------------------------------------------
 
-def _stattab_reihe(cube: str, festlegungen: list) -> tuple:
+_STATTAB_META = {}
+
+
+def _stattab_reihe(cube: str, festlegungen: list,
+                   region: str = "neuhausen am rheinfall") -> tuple:
     """
     Zeitreihe fuer Neuhausen am Rheinfall aus einem STAT-TAB-Datenwuerfel.
     Liest zuerst die Struktur des Wuerfels und waehlt dann:
@@ -1091,7 +1096,10 @@ def _stattab_reihe(cube: str, festlegungen: list) -> tuple:
     Gibt ([(jahr, wert), ...], quellen_url) zurueck.
     """
     basis = f"{STATTAB_BASIS}/{cube}/{cube}.px"
-    meta = requests.get(basis, headers=HEADERS, timeout=60).json()
+    if cube not in _STATTAB_META:
+        _STATTAB_META[cube] = requests.get(
+            basis, headers=HEADERS, timeout=60).json()
+    meta = _STATTAB_META[cube]
 
     def wahl(texte, begriffe):
         klein = [t.lower() for t in texte]
@@ -1118,7 +1126,9 @@ def _stattab_reihe(cube: str, festlegungen: list) -> tuple:
             abfrage.append({"code": code,
                             "selection": {"filter": "all", "values": ["*"]}})
             continue
-        i = wahl(texte, ["neuhausen am rheinfall"])
+        ist_regions_dim = any(w in code.lower() for w in
+                              ("gemeinde", "kanton", "bezirk", "region"))
+        i = wahl(texte, [region]) if ist_regions_dim else None
         if i is not None:
             abfrage.append({"code": code,
                             "selection": {"filter": "item",
@@ -1172,6 +1182,14 @@ def _stattab_reihe(cube: str, festlegungen: list) -> tuple:
     return reihe, f"{STATTAB_SEITE}/{cube}/-/{cube}.px/"
 
 
+def _wachstum(reihe: list, ab_jahr: int):
+    """Prozentuale Veraenderung vom ersten Wert ab `ab_jahr` bis zum letzten."""
+    ab = [(j, w) for j, w in reihe if int(j) >= ab_jahr and w]
+    if len(ab) < 2 or not ab[0][1]:
+        return None
+    return round((ab[-1][1] / ab[0][1] - 1) * 100, 1)
+
+
 def baue_kennzahlen() -> None:
     # Zwischenspeicher: hoechstens einmal pro Woche neu abfragen
     if KENNZAHLEN_AUSGABE.exists():
@@ -1180,7 +1198,9 @@ def baue_kennzahlen() -> None:
             alt = json.loads(roh[roh.find("{"):roh.rfind("}") + 1])
             heute = int(datetime.now(_ZEITZONE).strftime("%Y%m%d")
                         if _ZEITZONE else datetime.now().strftime("%Y%m%d"))
-            if alt.get("naechste_pruefung", 0) > heute and alt.get("bereiche"):
+            if (alt.get("naechste_pruefung", 0) > heute
+                    and alt.get("bereiche")
+                    and alt.get("version", 1) >= KENNZAHLEN_VERSION):
                 print("  Kennzahlen: Zwischenspeicher aktuell "
                       f"(naechste Pruefung ab {alt['naechste_pruefung']})")
                 return
@@ -1226,14 +1246,95 @@ def baue_kennzahlen() -> None:
         except Exception as e:
             fehler.append(f"{name}: {e}")
 
+    # --- Auslaenderanteil (BFS, staendige Wohnbevoelkerung) ---
+    try:
+        ausland, url = _stattab_reihe(
+            "px-x-0102010000_104",
+            ["ausland", "ständige wohnbevölkerung"])
+        schweiz, _ = _stattab_reihe(
+            "px-x-0102010000_104",
+            ["schweiz (staatsangeh", "schweiz", "ständige wohnbevölkerung"])
+        ch = dict(schweiz)
+        reihe = []
+        for jahr, aus in ausland:
+            tot = (ch.get(jahr) or 0) + (aus or 0)
+            if tot:
+                reihe.append((jahr, round(aus / tot * 100, 1)))
+        if reihe:
+            karte("Bevölkerung", "Ausländeranteil", "%",
+                  reihe, "BFS, STAT-TAB", url)
+            print(f"  Kennzahlen: Auslaenderanteil {reihe[0][0]}\u2013"
+                  f"{reihe[-1][0]} ({len(reihe)} Werte)")
+    except Exception as e:
+        fehler.append(f"Auslaenderanteil: {e}")
+
+    # --- Wohnen (BFS: Leerwohnungen, Neubau) ---
+    try:
+        reihe, url = _stattab_reihe(
+            "px-x-0902020300_101", ["ziffer", "anteil"])
+        karte("Wohnen", "Leerwohnungsziffer", "%",
+              reihe, "BFS, STAT-TAB", url)
+        print(f"  Kennzahlen: Leerwohnungsziffer {reihe[0][0]}\u2013"
+              f"{reihe[-1][0]} ({len(reihe)} Werte)")
+    except Exception as e:
+        fehler.append(f"Leerwohnungsziffer: {e}")
+    try:
+        reihe, url = _stattab_reihe("px-x-0904030000_103", [])
+        karte("Wohnen", "Neu erstellte Wohnungen", "Wohnungen",
+              reihe, "BFS, STAT-TAB", url)
+        print(f"  Kennzahlen: Neubau-Wohnungen {reihe[0][0]}\u2013"
+              f"{reihe[-1][0]} ({len(reihe)} Werte)")
+    except Exception as e:
+        fehler.append(f"Neu erstellte Wohnungen: {e}")
+
+    # --- Vergleich mit Kanton und Schweiz (Wachstum in Prozent) ---
+    for name, cube, festl, ab_jahr in (
+            ("Bevölkerungswachstum seit 2015",
+             "px-x-0102020000_201", ["bestand am 31. dezember"], 2015),
+            ("Beschäftigungswachstum seit 2011",
+             "px-x-0602010000_102", ["beschäftigte"], 2011)):
+        try:
+            werte = []
+            url = ""
+            for label, region in (("Neuhausen", "neuhausen am rheinfall"),
+                                  ("Kanton SH", "- schaffhausen"),
+                                  ("Schweiz", "schweiz")):
+                try:
+                    reihe, url = _stattab_reihe(cube, festl, region=region)
+                    w = _wachstum(reihe, ab_jahr)
+                    if w is not None:
+                        werte.append([label, w])
+                except Exception:
+                    continue
+            if werte and werte[0][0] == "Neuhausen" and len(werte) >= 2:
+                for b in bereiche:
+                    if b["titel"] == "Vergleich":
+                        ziel = b
+                        break
+                else:
+                    ziel = {"titel": "Vergleich", "karten": []}
+                    bereiche.append(ziel)
+                ziel["karten"].append({
+                    "typ": "vergleich", "name": name, "einheit": "%",
+                    "werte": werte, "reihe": [],
+                    "quelle": "BFS, STAT-TAB", "quelleUrl": url,
+                    "hinweis": "Veränderung in Prozent im gleichen Zeitraum",
+                })
+                print(f"  Kennzahlen: {name}: "
+                      + ", ".join(f"{l} {w:+.1f}%" for l, w in werte))
+            else:
+                fehler.append(f"{name}: zu wenige Regionen lieferbar")
+        except Exception as e:
+            fehler.append(f"{name}: {e}")
+
     # --- Steuerfuesse (Kanton Schaffhausen, verifizierte Werte) ---
     steuer_url = "https://sh.ch/CMS/get/file/40a314f4-33a6-49d6-a6fa-da4c8868ab1b"
     karte("Steuern", "Steuerfuss natürliche Personen", "%",
           [("2025", 83)], "Kanton Schaffhausen, Steuerfüsse 2025", steuer_url,
-          "Zeitreihe folgt in einer späteren Ausbaustufe")
+          "Zeitreihe folgt, sobald eine maschinenlesbare amtliche Quelle verfügbar ist")
     karte("Steuern", "Steuerfuss juristische Personen", "%",
           [("2025", 93)], "Kanton Schaffhausen, Steuerfüsse 2025", steuer_url,
-          "Zeitreihe folgt in einer späteren Ausbaustufe")
+          "Zeitreihe folgt, sobald eine maschinenlesbare amtliche Quelle verfügbar ist")
 
     for f in fehler:
         print(f"    Kennzahl nicht abrufbar: {f}", file=sys.stderr)
@@ -1248,6 +1349,7 @@ def baue_kennzahlen() -> None:
     jetzt = datetime.now(_ZEITZONE) if _ZEITZONE else datetime.now()
     from datetime import timedelta
     obj = {
+        "version": KENNZAHLEN_VERSION,
         "stand": jetzt.strftime("%d.%m.%Y %H:%M"),
         "naechste_pruefung": int((jetzt + timedelta(
             days=KENNZAHLEN_PRUEFTAKT_TAGE)).strftime("%Y%m%d")),
