@@ -254,6 +254,25 @@
   .jahr-saeule.aktiv .stab { background: var(--rot); }
   .jahr-saeule .lab { font-size: 10px; color: var(--grau); font-weight: 700; margin-top: 6px; }
 
+  .kz-stand { font-size: 12.5px; color: var(--grau); margin: 0 0 18px; }
+  .kz-karten {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 14px; margin-bottom: 8px;
+  }
+  .kz-karte { border: 2px solid var(--schwarz); padding: 14px 16px 12px; }
+  .kz-name {
+    font-size: 11px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.07em; margin-bottom: 8px;
+  }
+  .kz-wert { font-size: 32px; font-weight: 800; color: var(--rot); line-height: 1; }
+  .kz-wert small { font-size: 15px; font-weight: 700; color: var(--schwarz); margin-left: 3px; }
+  .kz-delta { font-size: 12px; font-weight: 600; color: var(--grau); margin-top: 5px; }
+  .kz-spark { margin-top: 10px; }
+  .kz-spark svg { display: block; width: 100%; height: 40px; }
+  .kz-quelle { font-size: 10.5px; color: var(--grau); margin-top: 9px; line-height: 1.5; }
+  .kz-quelle a { color: var(--rot); font-weight: 600; text-decoration: none; }
+  .kz-quelle a:hover { text-decoration: underline; }
+
   .leer, .fehler { font-size: 14px; color: var(--grau); padding: 20px 14px; }
   .fehler {
     background: var(--rosa); border-left: 4px solid var(--rot);
@@ -336,6 +355,7 @@
   <button class="tab" data-panel="berichte">Berichte &amp; Anträge<span class="anzahl" id="tabzahl-b"></span></button>
   <button class="tab" data-panel="protokolle">Beschlüsse &amp; Protokolle<span class="anzahl" id="tabzahl-p"></span></button>
   <button class="tab" data-panel="statistik">Statistik</button>
+  <button class="tab" data-panel="kennzahlen">Kennzahlen</button>
   <button class="tab" data-panel="aktuelles">Aktuelles<span class="anzahl" id="tabzahl-a"></span></button>
   <button class="tab" data-panel="presse">Presse<span class="anzahl" id="tabzahl-pr"></span></button>
 </nav>
@@ -445,6 +465,12 @@
     <div id="stat-bereich"><p class="leer">Wird geladen …</p></div>
   </section>
 
+  <!-- TAB: KENNZAHLEN -->
+  <section class="panel" id="panel-kennzahlen">
+    <p class="kz-stand" id="kz-stand"></p>
+    <div id="kz-bereich"><p class="leer">Wird geladen …</p></div>
+  </section>
+
   <!-- TAB: AKTUELLES -->
   <section class="panel" id="panel-aktuelles">
     <div class="filter">
@@ -516,7 +542,9 @@
       und überregionaler Medien mit Neuhausen-Bezug; verlinkt werden Titel und
       Kurzanriss, gelesen wird der Artikel beim jeweiligen Medium (teils Abo nötig),
       ohne Gewähr auf Vollständigkeit; das Archiv reicht, soweit die Medien es
-      hergeben, bis 2020 zurück. Die Fraktionszuordnungen wurden manuell
+      hergeben, bis 2020 zurück. Die <b>Kennzahlen</b> stammen aus amtlichen
+      Quellen (Bundesamt für Statistik, Kanton Schaffhausen) und werden
+      wöchentlich abgeglichen; die Quelle ist bei jeder Kennzahl angegeben. Die Fraktionszuordnungen wurden manuell
       erstellt, Fehler sind möglich.
     </p>
     <p>Markierungen zurücksetzen? <button class="reset" id="reset">Gespeicherten Lesestand löschen</button></p>
@@ -524,6 +552,7 @@
 
 </div>
 
+<script src="kennzahlen.js"></script>
 <script src="neuhausen_daten.js"></script>
 <script>
 (function () {
@@ -1128,6 +1157,115 @@
     document.body.appendChild(s);
   }
 
+  // ---- Rendering: Kennzahlen ---------------------------------------------------
+  function kzZahl(w) {
+    if (typeof w !== "number") return String(w);
+    return w.toLocaleString("de-CH").replace(/,/g, "\u2019");
+  }
+  function kzSparkline(reihe) {
+    var ns = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", "0 0 120 40");
+    svg.setAttribute("preserveAspectRatio", "none");
+    var werte = reihe.map(function (p) { return p[1]; });
+    var min = Math.min.apply(null, werte), max = Math.max.apply(null, werte);
+    var spanne = (max - min) || 1;
+    var punkte = werte.map(function (w, i) {
+      var x = werte.length > 1 ? i / (werte.length - 1) * 116 + 2 : 60;
+      var y = 36 - (w - min) / spanne * 30;
+      return [x, y];
+    });
+    var linie = document.createElementNS(ns, "polyline");
+    linie.setAttribute("points", punkte.map(function (p) {
+      return p[0].toFixed(1) + "," + p[1].toFixed(1);
+    }).join(" "));
+    linie.setAttribute("fill", "none");
+    linie.setAttribute("stroke", "#E2001A");
+    linie.setAttribute("stroke-width", "2.5");
+    svg.appendChild(linie);
+    var ende = punkte[punkte.length - 1];
+    var punkt = document.createElementNS(ns, "circle");
+    punkt.setAttribute("cx", ende[0].toFixed(1));
+    punkt.setAttribute("cy", ende[1].toFixed(1));
+    punkt.setAttribute("r", "3.2");
+    punkt.setAttribute("fill", "#E2001A");
+    svg.appendChild(punkt);
+    return svg;
+  }
+  function rendereKZ() {
+    var box = $("kz-bereich");
+    var kz = window.NEUHAUSEN_KENNZAHLEN;
+    box.innerHTML = "";
+    if (!kz || !kz.bereiche || !kz.bereiche.length) {
+      $("kz-stand").textContent = "";
+      box.innerHTML = '<p class="leer">Noch keine Kennzahlen vorhanden \u2013 ' +
+        'sie werden beim n\u00e4chsten Datenlauf erzeugt.</p>';
+      return;
+    }
+    $("kz-stand").textContent = "Datenstand Kennzahlen: " + (kz.stand || "\u2013") +
+      " \u00b7 amtliche Quellen, Angabe pro Kennzahl";
+    kz.bereiche.forEach(function (bereich) {
+      var block = document.createElement("div");
+      block.className = "stat-block";
+      var h = document.createElement("h2");
+      h.textContent = bereich.titel;
+      block.appendChild(h);
+      var raster = document.createElement("div");
+      raster.className = "kz-karten";
+      (bereich.karten || []).forEach(function (k) {
+        var karte = document.createElement("div");
+        karte.className = "kz-karte";
+        var name = document.createElement("div");
+        name.className = "kz-name"; name.textContent = k.name;
+        karte.appendChild(name);
+        var reihe = k.reihe || [];
+        var letzte = reihe[reihe.length - 1];
+        var wert = document.createElement("div");
+        wert.className = "kz-wert";
+        wert.textContent = letzte ? kzZahl(letzte[1]) : "\u2013";
+        if (k.einheit === "%") {
+          var proz = document.createElement("small");
+          proz.textContent = "%";
+          wert.appendChild(proz);
+        }
+        karte.appendChild(wert);
+        var delta = document.createElement("div");
+        delta.className = "kz-delta";
+        if (reihe.length >= 2) {
+          var vor = reihe[reihe.length - 2];
+          var diff = letzte[1] - vor[1];
+          delta.textContent = (diff > 0 ? "+" : "") + kzZahl(diff) +
+            " gegen\u00fcber " + vor[0] + " \u00b7 Stand " + letzte[0];
+        } else if (letzte) {
+          delta.textContent = "Stand " + letzte[0];
+        }
+        karte.appendChild(delta);
+        if (reihe.length >= 3) {
+          var spark = document.createElement("div");
+          spark.className = "kz-spark";
+          spark.appendChild(kzSparkline(reihe));
+          spark.title = reihe[0][0] + " bis " + letzte[0];
+          karte.appendChild(spark);
+        }
+        var quelle = document.createElement("div");
+        quelle.className = "kz-quelle";
+        var qa = document.createElement("a");
+        qa.href = k.quelleUrl || "#"; qa.target = "_blank"; qa.rel = "noopener";
+        qa.textContent = k.quelle || "Quelle";
+        quelle.appendChild(document.createTextNode("Quelle: "));
+        quelle.appendChild(qa);
+        if (k.hinweis) {
+          quelle.appendChild(document.createElement("br"));
+          quelle.appendChild(document.createTextNode(k.hinweis));
+        }
+        karte.appendChild(quelle);
+        raster.appendChild(karte);
+      });
+      block.appendChild(raster);
+      box.appendChild(block);
+    });
+  }
+
   // ---- Rendering: Statistik ----------------------------------------------------
   function rendereJahrFilter() {
     var box = $("jahr-filter");
@@ -1404,6 +1542,7 @@
 
   function starte() {
     messeKopfOffset();
+    rendereKZ();
     if (window.NEUHAUSEN_DATEN) {
       verarbeite(window.NEUHAUSEN_DATEN);
     } else {

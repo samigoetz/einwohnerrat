@@ -49,6 +49,10 @@ PRESSE_ARCHIV_AUSGABE = BASIS / "presse_archiv.js"
 PRESSE_ANZEIGE_TAGE = 365        # juengere Artikel stehen direkt auf der Seite
 PRESSE_LEAD_MAX_PRO_LAUF = 40    # so viele fehlende Leads werden pro Lauf geholt
 PRESSE_RUECKFUELL_AB_JAHR = 2020
+KENNZAHLEN_AUSGABE = BASIS / "kennzahlen.js"
+KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
+STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
+STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
 VOLLTEXT_AUSGABE = BASIS / "volltext.js"
 VOLLTEXT_MAX_ZEICHEN = 150000   # Textobergrenze pro Dokument
@@ -1067,6 +1071,195 @@ def baue_presse() -> tuple:
     return juengste, quellen_fehler
 
 
+# ---------------------------------------------------------------------------
+# Kennzahlen: amtliche Zahlen zur Gemeinde (Etappe 1).
+# Quellen: BFS STAT-TAB (Bevoelkerung, Beschaeftigung) via oeffentliche
+# Schnittstelle ohne Anmeldung, plus verifizierte Steuerfuesse des Kantons.
+# Ergebnis: kennzahlen.js, hoechstens einmal pro Woche neu abgefragt.
+# ---------------------------------------------------------------------------
+
+def _stattab_reihe(cube: str, festlegungen: list) -> tuple:
+    """
+    Zeitreihe fuer Neuhausen am Rheinfall aus einem STAT-TAB-Datenwuerfel.
+    Liest zuerst die Struktur des Wuerfels und waehlt dann:
+      - die Gemeinde Neuhausen am Rheinfall,
+      - alle Jahre,
+      - pro uebriger Dimension den Wert gemaess `festlegungen`
+        (Liste von Suchbegriffen) oder einen Total-Wert.
+    Lieber gar keine Zahl als eine falsche: Ohne eindeutige Auswahl
+    wird abgebrochen.
+    Gibt ([(jahr, wert), ...], quellen_url) zurueck.
+    """
+    basis = f"{STATTAB_BASIS}/{cube}/{cube}.px"
+    meta = requests.get(basis, headers=HEADERS, timeout=60).json()
+
+    def wahl(texte, begriffe):
+        klein = [t.lower() for t in texte]
+        for b in begriffe:
+            b = b.lower()
+            for i, t in enumerate(klein):
+                if t == b:
+                    return i
+            for i, t in enumerate(klein):
+                if t.startswith(b):
+                    return i
+            for i, t in enumerate(klein):
+                if b in t:
+                    return i
+        return None
+
+    abfrage = []
+    zeit_code = None
+    for var in meta.get("variables", []):
+        code = var["code"]
+        texte = var.get("valueTexts", [])
+        if var.get("time") or code.lower() in ("jahr", "periode"):
+            zeit_code = code
+            abfrage.append({"code": code,
+                            "selection": {"filter": "all", "values": ["*"]}})
+            continue
+        i = wahl(texte, ["neuhausen am rheinfall"])
+        if i is not None:
+            abfrage.append({"code": code,
+                            "selection": {"filter": "item",
+                                          "values": [var["values"][i]]}})
+            continue
+        i = wahl(texte, festlegungen + ["total"])
+        if i is None:
+            raise RuntimeError(f"{cube}: keine eindeutige Auswahl fuer '{code}'")
+        abfrage.append({"code": code,
+                        "selection": {"filter": "item",
+                                      "values": [var["values"][i]]}})
+    if zeit_code is None:
+        raise RuntimeError(f"{cube}: keine Zeitachse gefunden")
+
+    antwort = requests.post(
+        basis, json={"query": abfrage, "response": {"format": "json-stat2"}},
+        headers=HEADERS, timeout=90)
+    antwort.raise_for_status()
+    js = antwort.json()
+    if "dataset" in js:  # aeltere json-stat-Variante
+        js = js["dataset"]
+        ids = js["dimension"]["id"]
+        dims = js["dimension"]
+    else:
+        ids = js["id"]
+        dims = js["dimension"]
+
+    zeit_id = None
+    for i in ids:
+        if i.lower() == zeit_code.lower():
+            zeit_id = i
+            break
+    if zeit_id is None:
+        zeit_id = ids[-1]
+    kat = dims[zeit_id]["category"]
+    index = kat.get("index")
+    labels = kat.get("label", {})
+    if isinstance(index, list):
+        index = {c: p for p, c in enumerate(index)}
+    werte = js["value"]
+
+    reihe = []
+    for codewert, pos in sorted(index.items(), key=lambda kv: kv[1]):
+        if pos >= len(werte) or werte[pos] is None:
+            continue
+        jahr = str(labels.get(codewert, codewert))[:4]
+        if re.match(r"^\d{4}$", jahr):
+            reihe.append((jahr, werte[pos]))
+    if not reihe:
+        raise RuntimeError(f"{cube}: leere Zeitreihe")
+    return reihe, f"{STATTAB_SEITE}/{cube}/-/{cube}.px/"
+
+
+def baue_kennzahlen() -> None:
+    # Zwischenspeicher: hoechstens einmal pro Woche neu abfragen
+    if KENNZAHLEN_AUSGABE.exists():
+        try:
+            roh = KENNZAHLEN_AUSGABE.read_text(encoding="utf-8")
+            alt = json.loads(roh[roh.find("{"):roh.rfind("}") + 1])
+            heute = int(datetime.now(_ZEITZONE).strftime("%Y%m%d")
+                        if _ZEITZONE else datetime.now().strftime("%Y%m%d"))
+            if alt.get("naechste_pruefung", 0) > heute and alt.get("bereiche"):
+                print("  Kennzahlen: Zwischenspeicher aktuell "
+                      f"(naechste Pruefung ab {alt['naechste_pruefung']})")
+                return
+        except Exception:
+            pass
+
+    bereiche = []
+    fehler = []
+
+    def karte(bereich_titel, name, einheit, reihe, quelle, quelle_url, hinweis=""):
+        for b in bereiche:
+            if b["titel"] == bereich_titel:
+                ziel = b
+                break
+        else:
+            ziel = {"titel": bereich_titel, "karten": []}
+            bereiche.append(ziel)
+        ziel["karten"].append({
+            "name": name, "einheit": einheit,
+            "reihe": [[j, w] for j, w in reihe],
+            "quelle": quelle, "quelleUrl": quelle_url, "hinweis": hinweis,
+        })
+
+    # --- Bevoelkerung (BFS, demografische Bilanz je Gemeinde) ---
+    try:
+        reihe, url = _stattab_reihe(
+            "px-x-0102020000_201", ["bestand am 31. dezember"])
+        karte("Bevölkerung", "Ständige Wohnbevölkerung", "Personen",
+              reihe, "BFS, STAT-TAB", url)
+        print(f"  Kennzahlen: Bevoelkerung {reihe[0][0]}\u2013{reihe[-1][0]} "
+              f"({len(reihe)} Werte)")
+    except Exception as e:
+        fehler.append(f"Bevoelkerung: {e}")
+
+    # --- Beschaeftigung (BFS, STATENT je Gemeinde) ---
+    for name, begriff in (("Beschäftigte", "beschäftigte"),
+                          ("Arbeitsstätten", "arbeitsstätten")):
+        try:
+            reihe, url = _stattab_reihe("px-x-0602010000_102", [begriff])
+            karte("Beschäftigung", name, name, reihe, "BFS, STAT-TAB", url)
+            print(f"  Kennzahlen: {name} {reihe[0][0]}\u2013{reihe[-1][0]} "
+                  f"({len(reihe)} Werte)")
+        except Exception as e:
+            fehler.append(f"{name}: {e}")
+
+    # --- Steuerfuesse (Kanton Schaffhausen, verifizierte Werte) ---
+    steuer_url = "https://sh.ch/CMS/get/file/40a314f4-33a6-49d6-a6fa-da4c8868ab1b"
+    karte("Steuern", "Steuerfuss natürliche Personen", "%",
+          [("2025", 83)], "Kanton Schaffhausen, Steuerfüsse 2025", steuer_url,
+          "Zeitreihe folgt in einer späteren Ausbaustufe")
+    karte("Steuern", "Steuerfuss juristische Personen", "%",
+          [("2025", 93)], "Kanton Schaffhausen, Steuerfüsse 2025", steuer_url,
+          "Zeitreihe folgt in einer späteren Ausbaustufe")
+
+    for f in fehler:
+        print(f"    Kennzahl nicht abrufbar: {f}", file=sys.stderr)
+
+    bfs_karten = sum(len(b["karten"]) for b in bereiche
+                     if b["titel"] != "Steuern")
+    if bfs_karten == 0 and KENNZAHLEN_AUSGABE.exists():
+        print("  Kennzahlen: BFS nicht erreichbar, bestehende Datei bleibt",
+              file=sys.stderr)
+        return
+
+    jetzt = datetime.now(_ZEITZONE) if _ZEITZONE else datetime.now()
+    from datetime import timedelta
+    obj = {
+        "stand": jetzt.strftime("%d.%m.%Y %H:%M"),
+        "naechste_pruefung": int((jetzt + timedelta(
+            days=KENNZAHLEN_PRUEFTAKT_TAGE)).strftime("%Y%m%d")),
+        "bereiche": bereiche,
+    }
+    KENNZAHLEN_AUSGABE.write_text(
+        "window.NEUHAUSEN_KENNZAHLEN = "
+        + json.dumps(obj, ensure_ascii=False) + ";\n", encoding="utf-8")
+    print(f"  Kennzahlen: {sum(len(b['karten']) for b in bereiche)} Karten "
+          f"in {len(bereiche)} Bereichen geschrieben")
+
+
 def main():
     vorstoesse = []
     berichte = []
@@ -1117,6 +1310,14 @@ def main():
             fehler.append("Presse: keine Quelle erreichbar")
     except Exception as e:
         print(f"  Presse FEHLER: {e}", file=sys.stderr)
+
+    if "--ohne-kennzahlen" not in sys.argv:
+        try:
+            baue_kennzahlen()
+        except Exception as e:
+            print(f"  Kennzahlen FEHLER: {e}", file=sys.stderr)
+    else:
+        print("Kennzahlen uebersprungen (--ohne-kennzahlen)")
 
     daten = {
         "erzeugt": datetime.now(_ZEITZONE).strftime("%d.%m.%Y %H:%M"),
