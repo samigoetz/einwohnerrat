@@ -1495,7 +1495,45 @@ def baue_kennzahlen() -> None:
           f"in {len(bereiche)} Bereichen geschrieben")
 
 
+def diagnose_stattab():
+    """Schreibt die echten Dimensionen und Werttexte der Kennzahlen-Wuerfel
+    ins Protokoll. Aufruf: python neuhausen_daten.py --diagnose-stattab"""
+    wuerfel = [
+        ("Bevoelkerung", "px-x-0102020000_201"),
+        ("Auslaenderanteil", "px-x-0102010000_104"),
+        ("Leerwohnungen", "px-x-0902020300_101"),
+        ("Neubau", "px-x-0904030000_103"),
+    ]
+    for name, cube in wuerfel:
+        print(f"\n===== {name}: {cube} =====")
+        try:
+            basis = f"{STATTAB_BASIS}/{cube}/{cube}.px"
+            r = requests.get(basis, headers=HEADERS, timeout=60)
+            r.raise_for_status()
+            meta = r.json()
+            for var in meta.get("variables", []):
+                code = var["code"]
+                texte = var.get("valueTexts", [])
+                werte = var.get("values", [])
+                ist_zeit = var.get("time") or code.lower() in ("jahr", "periode")
+                if ist_zeit or len(texte) > 25:
+                    # Zeit und Riesenlisten (Laender, Gemeinden) nur gekuerzt
+                    proben = list(zip(werte[:4], texte[:4]))
+                    print(f"  [{code}] ({len(texte)} Werte, gekuerzt): {proben} ...")
+                else:
+                    print(f"  [{code}] ({len(texte)} Werte):")
+                    for w, t in zip(werte, texte):
+                        print(f"       {w!r} = {t!r}")
+        except Exception as e:
+            print(f"  FEHLER: {e}")
+    print("\n===== Ende Diagnose =====")
+
+
 def main():
+    if "--diagnose-stattab" in sys.argv:
+        diagnose_stattab()
+        return
+
     vorstoesse = []
     berichte = []
     beschluesse = []
