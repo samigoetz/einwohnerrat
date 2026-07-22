@@ -1450,27 +1450,55 @@ def diagnose_leerwohnung():
             print(f"  {df}: FEHLER {str(e)[:60]}")
     print("  (Die antwortende Kennung wird als SDMX_BESTAND eingetragen.)")
 
-    print("\n--- Verfuegbare Dataflows im Register (Suche nach Wohnungs-Bestand) ---")
-    for agentur in ("CH1.GWS", "CH1.BEW", "CH1"):
-        url = f"https://disseminate.stats.swiss/rest/dataflow/{agentur}"
-        try:
-            r = requests.get(url, headers=HEADERS, timeout=40)
-            print(f"  {agentur}: HTTP {r.status_code}, {len(r.content):,} Bytes")
-            if r.status_code < 400:
-                txt = r.content.decode("utf-8", "replace")
-                # Dataflow-IDs und Namen grob herausfischen
-                import re as _re
-                ids = _re.findall(r'(?:id|agencyID)="([^"]+)"', txt)
-                namen = _re.findall(r'<[^>]*Name[^>]*>([^<]{5,70})</', txt)
-                interessant = [n for n in namen if any(
-                    w in n.lower() for w in ("wohnung", "dwelling", "bestand",
-                                             "logement", "gws"))]
-                if ids:
-                    print(f"    IDs (Ausschnitt): {sorted(set(ids))[:12]}")
-                if interessant:
-                    print(f"    Passende Namen: {interessant[:6]}")
-        except Exception as e:
-            print(f"  {agentur}: FEHLER {str(e)[:60]}")
+    print("\n--- GWS-Datenfluesse REG1-REG7 auf Wohnungsbestand pruefen ---")
+    # Zuerst die Klarnamen der REG-Datenfluesse aus dem Register holen.
+    try:
+        rreg = requests.get(
+            "https://disseminate.stats.swiss/rest/dataflow/CH1.GWS",
+            headers=HEADERS, timeout=40)
+        if rreg.status_code < 400:
+            txt = rreg.content.decode("utf-8", "replace")
+            import re as _re
+            # Bloecke je Dataflow: id="DF_GWS_REGn" ... <Name ...>Text</Name>
+            for m in _re.finditer(
+                    r'id="(DF_GWS_REG\d)"[^>]*>(.*?)</structure:Dataflow>',
+                    txt, _re.DOTALL):
+                dfid = m.group(1)
+                namen = _re.findall(r'>([^<]{8,90})</(?:common:)?Name>', m.group(2))
+                deutsch = namen[0] if namen else "?"
+                print(f"  {dfid}: {deutsch[:80]}")
+    except Exception as e:
+        print(f"  Register-Namen FEHLER: {str(e)[:60]}")
+
+    # Dann testen, welcher fuer Neuhausen (2937) Werte liefert.
+    for n in range(1, 8):
+        df = f"CH1.GWS,DF_GWS_REG{n},1.0.0"
+        # verschiedene Wildcard-Laengen probieren (Dimensionszahl unbekannt)
+        for muster in (f"2937....A", f"2937...A", f"2937.....A", f"2937......A"):
+            url = (f"{SDMX_BASIS}/{df}/{muster}"
+                   f"?dimensionAtObservation=AllDimensions")
+            try:
+                kopf = dict(HEADERS)
+                kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
+                r = requests.get(url, headers=kopf, timeout=40)
+                if r.status_code < 400 and len(r.content) > 200:
+                    txt = r.content.decode("utf-8-sig", "replace")
+                    zeilen = txt.split("\n")
+                    kopfzeile = zeilen[0]
+                    print(f"  DF_GWS_REG{n} [{muster}]: HTTP {r.status_code}, "
+                          f"{len(r.content):,} B, {len(zeilen)} Zeilen")
+                    print(f"    Spalten: {kopfzeile[:140]}")
+                    # ein paar Datenzeilen zeigen zum Verstehen
+                    for zz in zeilen[1:4]:
+                        if zz.strip():
+                            print(f"    > {zz[:140]}")
+                    break   # dieses REG mit passendem Muster gefunden
+                elif r.status_code < 400:
+                    # antwortet, aber leer -> Muster passt nicht
+                    continue
+            except Exception as e:
+                print(f"  DF_GWS_REG{n} [{muster}]: FEHLER {str(e)[:50]}")
+                break
     print("\n===== Ende Leerwohnungs-Diagnose =====")
 
 
