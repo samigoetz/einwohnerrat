@@ -1470,35 +1470,50 @@ def diagnose_leerwohnung():
     except Exception as e:
         print(f"  Register-Namen FEHLER: {str(e)[:60]}")
 
-    # Dann testen, welcher fuer Neuhausen (2937) Werte liefert.
-    for n in range(1, 8):
-        df = f"CH1.GWS,DF_GWS_REG{n},1.0.0"
-        # verschiedene Wildcard-Laengen probieren (Dimensionszahl unbekannt)
-        for muster in (f"2937....A", f"2937...A", f"2937.....A", f"2937......A"):
-            url = (f"{SDMX_BASIS}/{df}/{muster}"
-                   f"?dimensionAtObservation=AllDimensions")
-            try:
-                kopf = dict(HEADERS)
-                kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
-                r = requests.get(url, headers=kopf, timeout=40)
-                if r.status_code < 400 and len(r.content) > 200:
-                    txt = r.content.decode("utf-8-sig", "replace")
-                    zeilen = txt.split("\n")
-                    kopfzeile = zeilen[0]
-                    print(f"  DF_GWS_REG{n} [{muster}]: HTTP {r.status_code}, "
-                          f"{len(r.content):,} B, {len(zeilen)} Zeilen")
-                    print(f"    Spalten: {kopfzeile[:140]}")
-                    # ein paar Datenzeilen zeigen zum Verstehen
-                    for zz in zeilen[1:4]:
-                        if zz.strip():
-                            print(f"    > {zz[:140]}")
-                    break   # dieses REG mit passendem Muster gefunden
-                elif r.status_code < 400:
-                    # antwortet, aber leer -> Muster passt nicht
-                    continue
-            except Exception as e:
-                print(f"  DF_GWS_REG{n} [{muster}]: FEHLER {str(e)[:50]}")
+    print("\n--- DF_GWS_REG6 (Wohnungsbestand) fuer Neuhausen 2937 ---")
+    # REG6 = "Wohnungen nach Kanton, Gebaeudekategorie, Anzahl Zimmer,
+    # Wohnungsflaeche und Bauperiode" -> Gesamtwohnungsbestand.
+    # Zuerst die Struktur (Dimensionen) laden, um die richtige Schluesselform
+    # und die Gemeinde-Dimension zu kennen.
+    df6 = "CH1.GWS,DF_GWS_REG6,1.0.0"
+    try:
+        rs = requests.get(
+            f"https://disseminate.stats.swiss/rest/datastructure/CH1.GWS/"
+            f"DSD_GWS_REG6/1.0.0?references=children",
+            headers=HEADERS, timeout=40)
+        print(f"  Struktur: HTTP {rs.status_code}, {len(rs.content):,} B")
+        if rs.status_code < 400:
+            import re as _re
+            txt = rs.content.decode("utf-8", "replace")
+            dims = _re.findall(r'<structure:Dimension[^>]*id="([^"]+)"', txt)
+            if not dims:
+                dims = _re.findall(r'id="([A-Z_]+)"[^>]*position=', txt)
+            print(f"  Dimensionen (Reihenfolge): {dims}")
+    except Exception as e:
+        print(f"  Struktur-FEHLER: {str(e)[:60]}")
+
+    # Dann Datenabruf mit verschiedenen Wildcard-Laengen, bis Werte kommen.
+    for anzahl_punkte in range(3, 9):
+        muster = "2937" + "." * anzahl_punkte + "A"
+        url = (f"{SDMX_BASIS}/{df6}/{muster}"
+               f"?dimensionAtObservation=AllDimensions")
+        try:
+            kopf = dict(HEADERS)
+            kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
+            r = requests.get(url, headers=kopf, timeout=45)
+            if r.status_code < 400 and len(r.content) > 200:
+                txt = r.content.decode("utf-8-sig", "replace")
+                zeilen = [z for z in txt.split("\n") if z.strip()]
+                print(f"  [{muster}]: HTTP 200, {len(zeilen)} Zeilen")
+                print(f"    Spalten: {zeilen[0][:150]}")
+                for zz in zeilen[1:5]:
+                    print(f"    > {zz[:150]}")
                 break
+            else:
+                print(f"  [{muster}]: HTTP {r.status_code}, "
+                      f"{len(r.content)} B (leer/kein Treffer)")
+        except Exception as e:
+            print(f"  [{muster}]: FEHLER {str(e)[:50]}")
     print("\n===== Ende Leerwohnungs-Diagnose =====")
 
 
