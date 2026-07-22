@@ -51,8 +51,17 @@ PRESSE_LEAD_MAX_PRO_LAUF = 40    # so viele fehlende Leads werden pro Lauf gehol
 PRESSE_RUECKFUELL_AB_JAHR = 2020
 KENNZAHLEN_AUSGABE = BASIS / "kennzahlen.js"
 VERGLEICH_AUSGABE = BASIS / "vergleich.js"
+
+# Offizielle SDMX-Schnittstelle der Bundesstatistik (data.stats.swiss).
+# Leerwohnungszaehlung: absolute Anzahl leer stehender Wohnungen je Gemeinde,
+# aufgeschluesselt nach Anzahl Zimmer und Typ. Neuhausen = BFS-Nr 2937.
+SDMX_BASIS = "https://disseminate.stats.swiss/rest/data"
+SDMX_LEERWOHNUNG = "CH1.LWZ,DF_LWZ_1,1.0.0"
+# Wohnungsbestand nach Zimmerzahl (fuer die Prozent-Berechnung als Nenner).
+# Die Dataflow-Kennung wird per Diagnose am echten System verifiziert.
+SDMX_BESTAND = "CH1.GWS,DF_GWS_WHG_1,1.0.0"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 19          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 20          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -1270,59 +1279,161 @@ def _wachstum(reihe: list, ab_jahr: int):
     return round((ab[-1][1] / ab[0][1] - 1) * 100, 1)
 
 
-def _leerwohnungsziffer(region_begriff: str = "neuhausen am rheinfall") -> tuple:
-    """Liest die Leerwohnungsziffer-Zeitreihe direkt aus der amtlichen
-    Aktuelles-Meldung der Gemeinde Neuhausen. Die Gemeinde veroeffentlicht
-    jaehrlich eine Meldung "Leerwohnungsbestand per 1. Juni ...", die die
-    komplette Zeitreihe mit exakten Prozentwerten enthaelt.
+def _sdmx_csv(dataflow: str, schluessel: str, timeout: int = 90) -> list:
+    """Ruft die SDMX-API im CSV-Format ab und gibt eine Liste von dict-Zeilen
+    zurueck (Spaltenname -> Wert). Robust gegen die begleitenden Struktur- und
+    Metadatenspalten der Bundesstatistik-Schnittstelle."""
+    import csv
+    import io
+    url = (f"{SDMX_BASIS}/{dataflow}/{schluessel}"
+           f"?dimensionAtObservation=AllDimensions")
+    kopf = dict(HEADERS)
+    kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
+    r = requests.get(url, headers=kopf, timeout=timeout)
+    r.raise_for_status()
+    text = r.content.decode("utf-8-sig", "replace")
+    leser = csv.DictReader(io.StringIO(text))
+    return list(leser), url
 
-    Das ist die verlaesslichste Quelle: amtlich, gemeindescharf, oeffentlich
-    und auf derselben Website, die ohnehin schon ausgelesen wird. Der frueher
-    versuchte BFS-Weg (STAT-TAB-Wuerfel, Asset-Schnittstelle) war fuer diese
-    kleine Gemeinde nicht zuverlaessig zugaenglich.
 
-    Selbstvalidierend: Es werden nur Jahr-Prozent-Paare mit plausibler Ziffer
-    (0-30 %) uebernommen; ohne mindestens 3 Paare wird abgebrochen.
-    Gibt ([(jahr, ziffer), ...], quellen_url) zurueck."""
-    roh = requests.get(AKTUELLES_URL, headers=HEADERS, timeout=60)
-    roh.raise_for_status()
-    text = roh.text
+def _leerwohnung_bestand(bfs_nr: str = "2937") -> dict:
+    """Holt den Gesamtwohnungsbestand je Jahr aus der GWS-SDMX-Quelle.
+    Gibt {jahr: bestand} zurueck. Bei Fehlschlag leeres dict, damit die
+    Prozentberechnung optional bleibt und die Anzahl-Kennzahl trotzdem steht."""
+    try:
+        zeilen, _ = _sdmx_csv(SDMX_BESTAND, f"{bfs_nr}....A")
+    except Exception:
+        return {}
+    bestand = {}
+    for z in zeilen:
+        jahr = (z.get("TIME_PERIOD") or "").strip()
+        wert = (z.get("OBS_VALUE") or "").strip()
+        # nur Totalzeilen (keine Aufschluesselung nach Zimmerzahl)
+        zimmer = (z.get("WOHN_ANZAHL") or z.get("ROOMS") or "_T").strip()
+        if jahr and wert and zimmer in ("_T", "", "T"):
+            try:
+                bestand[jahr] = int(round(float(wert)))
+            except ValueError:
+                continue
+    return bestand
 
-    # Alle Datenpaare der Form "1. Juni JJJJ  NN Wohnungen  P.PP %" einsammeln.
-    # Die Meldung listet je Jahr eine Zeile; ueber mehrere Jahresmeldungen
-    # hinweg ergibt sich die volle Reihe. Wir nehmen pro Jahr den Wert aus der
-    # neuesten Meldung (die zuerst im Seitentext steht).
-    muster = re.compile(
-        r"1\.\s*Juni\s*(20\d{2})\s+\d+\s+Wohnungen\s+"
-        r"(\d+[.,]\d+)\s*%")
-    gefunden = {}
-    for m in muster.finditer(text):
-        jahr = m.group(1)
-        ziffer = float(m.group(2).replace(",", "."))
-        if 0 <= ziffer <= 30 and jahr not in gefunden:
-            gefunden[jahr] = round(ziffer, 2)
 
-    if len(gefunden) < 3:
-        raise RuntimeError(
-            f"zu wenige Leerwohnungs-Werte in der Gemeinde-Meldung "
-            f"({len(gefunden)} gefunden)")
-    reihe = sorted(gefunden.items())
-    return reihe, AKTUELLES_URL
+def _leerwohnungsziffer(region_begriff: str = "neuhausen am rheinfall",
+                        bfs_nr: str = "2937") -> tuple:
+    """Holt die Leerwohnungsdaten aus der offiziellen SDMX-API der
+    Bundesstatistik (data.stats.swiss). Liefert die absolute Anzahl leer
+    stehender Wohnungen je Jahr; die Leerwohnungsziffer in Prozent wird mit
+    dem Gesamtbestand aus der GWS-Quelle berechnet. Zusaetzlich die
+    Aufschluesselung nach Zimmerzahl fuer das neueste Jahr.
+
+    Gibt (reihe, url, extra) zurueck:
+      reihe: [(jahr, ziffer_prozent_oder_None), ...] wenn Bestand vorhanden,
+             sonst [(jahr, anzahl), ...]
+      extra: dict mit anzahl_reihe, bestand_reihe, zimmer_verteilung, ist_ziffer
+    Selbstvalidierend: nur plausible Jahre 1990-2100 und nicht-negative Werte."""
+    # 1) Anzahl leer stehender Wohnungen, Total ueber Zimmer und Typ
+    #    Schluessel: GR_KT_GDE . WOHN_ANZAHL . LEERWOHN_TYP . MEASURE . FREQ
+    #    2937 . _T (alle Zimmer) . _T (alle Typen) . V (Wert) . A (jaehrlich)
+    zeilen, url = _sdmx_csv(SDMX_LEERWOHNUNG, f"{bfs_nr}._T._T.V.A")
+    anzahl = {}
+    for z in zeilen:
+        jahr = (z.get("TIME_PERIOD") or "").strip()
+        wert = (z.get("OBS_VALUE") or "").strip()
+        zc = (z.get("WOHN_ANZAHL") or "_T").strip()
+        typ = (z.get("LEERWOHN_TYP") or "_T").strip()
+        # Nur die Gesamtsumme (alle Zimmer, alle Typen)
+        if zc not in ("_T", "", "T") or typ not in ("_T", "", "T"):
+            continue
+        if jahr and wert:
+            try:
+                j = int(jahr)
+                v = int(round(float(wert)))
+                if 1990 <= j <= 2100 and v >= 0:
+                    anzahl[jahr] = v
+            except ValueError:
+                continue
+    if len(anzahl) < 3:
+        raise RuntimeError(f"zu wenige Leerwohnungs-Werte aus SDMX ({len(anzahl)})")
+
+    # 2) Aufschluesselung nach Zimmerzahl fuer das neueste Jahr
+    #    (alle Zimmerkategorien, Typ Total)
+    zimmer_zeilen, _ = _sdmx_csv(SDMX_LEERWOHNUNG, f"{bfs_nr}..._T.V.A")
+    neuestes = max(anzahl)
+    zimmer_namen = {"1": "1 Zimmer", "2": "2 Zimmer", "3": "3 Zimmer",
+                    "4": "4 Zimmer", "5": "5 Zimmer", "6": "6+ Zimmer"}
+    verteilung = {}
+    for z in zimmer_zeilen:
+        jahr = (z.get("TIME_PERIOD") or "").strip()
+        zc = (z.get("WOHN_ANZAHL") or "").strip()
+        typ = (z.get("LEERWOHN_TYP") or "_T").strip()
+        wert = (z.get("OBS_VALUE") or "").strip()
+        # Nur Typ-Total-Zeilen, sonst wuerden Typ-Unterkategorien mitzaehlen
+        if jahr == neuestes and typ in ("_T", "", "T") \
+                and zc in zimmer_namen and wert:
+            try:
+                verteilung[zimmer_namen[zc]] = int(round(float(wert)))
+            except ValueError:
+                continue
+
+    # 3) Gesamtbestand fuer die Prozent-Ziffer
+    bestand = _leerwohnung_bestand(bfs_nr)
+
+    # 4) Reihe bauen: Ziffer in % wenn Bestand vorhanden, sonst Anzahl
+    anzahl_reihe = sorted((j, v) for j, v in anzahl.items())
+    ist_ziffer = bool(bestand)
+    if ist_ziffer:
+        reihe = []
+        for jahr, leer in anzahl_reihe:
+            best = bestand.get(jahr)
+            if best and best > 0:
+                reihe.append((jahr, round(leer / best * 100, 2)))
+        # Falls fuer zu wenige Jahre ein Bestand vorliegt, auf Anzahl zurueck
+        if len(reihe) < 3:
+            ist_ziffer = False
+            reihe = anzahl_reihe
+    else:
+        reihe = anzahl_reihe
+
+    extra = {
+        "anzahl_reihe": anzahl_reihe,
+        "bestand_reihe": sorted(bestand.items()),
+        "zimmer_verteilung": verteilung,
+        "neuestes_jahr": neuestes,
+        "ist_ziffer": ist_ziffer,
+    }
+    return reihe, url, extra
 
 
 def diagnose_leerwohnung():
-    """Testet das Auslesen der Leerwohnungsziffer aus der Gemeinde-Meldung.
+    """Testet die Leerwohnungsdaten aus der SDMX-API.
     Aufruf: python neuhausen_daten.py --diagnose-leerwohnung"""
-    print("===== Leerwohnungsziffer-Diagnose =====")
-    print("Quelle: amtliche Aktuelles-Meldung der Gemeinde Neuhausen\n")
+    print("===== Leerwohnungs-Diagnose (SDMX-API data.stats.swiss) =====\n")
+    print("--- Leerwohnungen (CH1.LWZ) ---")
     try:
-        reihe, url = _leerwohnungsziffer()
-        print(f"ERFOLG: {len(reihe)} Jahreswerte gelesen")
-        print(f"Zeitraum: {reihe[0][0]}-{reihe[-1][0]}, "
-              f"aktuell {reihe[-1][1]}%")
-        print(f"Reihe: {reihe}")
+        reihe, url, extra = _leerwohnungsziffer()
+        print(f"URL: {url}")
+        print(f"Anzahl-Reihe: {len(extra['anzahl_reihe'])} Jahre, "
+              f"{extra['anzahl_reihe'][0]} ... {extra['anzahl_reihe'][-1]}")
+        print(f"Bestand vorhanden: {'ja' if extra['ist_ziffer'] else 'nein'}"
+              f" ({len(extra['bestand_reihe'])} Jahre)")
+        if extra["ist_ziffer"]:
+            print(f"Ziffer-Reihe (%): {reihe[0]} ... {reihe[-1]}")
+        print(f"Zimmerverteilung {extra['neuestes_jahr']}: "
+              f"{extra['zimmer_verteilung']}")
     except Exception as e:
         print(f"FEHLGESCHLAGEN: {e}")
+
+    print("\n--- Bestand (GWS) separat pruefen ---")
+    try:
+        best = _leerwohnung_bestand()
+        if best:
+            js = sorted(best.items())
+            print(f"Bestand: {len(js)} Jahre, {js[0]} ... {js[-1]}")
+        else:
+            print("Bestand-Quelle lieferte keine Daten "
+                  "(Dataflow-Kennung SDMX_BESTAND pruefen)")
+    except Exception as e:
+        print(f"Bestand-FEHLER: {e}")
     print("\n===== Ende Leerwohnungs-Diagnose =====")
 
 
@@ -1597,15 +1708,47 @@ def baue_kennzahlen() -> None:
     # Jahrescodierung. Fuer kleine Gemeinden schwankt die Ziffer stark,
     # daher der Hinweis.
     try:
-        reihe, url = _leerwohnungsziffer()
+        reihe, url, extra = _leerwohnungsziffer()
         if reihe:
-            karte("Wohnen", "Leerwohnungsziffer", "%",
-                  reihe, "Gemeinde Neuhausen (Leerwohnungszählung BFS)", url,
-                  hinweis="Anteil leer stehender, am Markt angebotener "
-                          "Wohnungen (Stichtag 1. Juni). Bei kleinen Gemeinden "
-                          "von Jahr zu Jahr stark schwankend.")
-            print(f"  Kennzahlen: Leerwohnungsziffer {reihe[0][0]}\u2013"
-                  f"{reihe[-1][0]} ({len(reihe)} Werte, aktuell {reihe[-1][1]}%)")
+            ist_ziffer = extra.get("ist_ziffer")
+            einheit = "%" if ist_ziffer else "Wohnungen"
+            name = "Leerwohnungsziffer" if ist_ziffer else "Leer stehende Wohnungen"
+            hinweis = ("Anteil leer stehender Wohnungen am Gesamtbestand "
+                       "(Stichtag 1. Juni). Anzahl aus der Leerwohnungszählung, "
+                       "Bestand aus der Gebäude- und Wohnungsstatistik. Bei "
+                       "kleinen Gemeinden von Jahr zu Jahr stark schwankend."
+                       if ist_ziffer else
+                       "Anzahl leer stehender, am Markt angebotener Wohnungen "
+                       "(Stichtag 1. Juni). Bei kleinen Gemeinden stark "
+                       "schwankend.")
+            karte("Wohnen", name, einheit, reihe,
+                  "BFS, Leerwohnungszählung (data.stats.swiss)", url,
+                  hinweis=hinweis)
+            print(f"  Kennzahlen: {name} {reihe[0][0]}\u2013"
+                  f"{reihe[-1][0]} ({len(reihe)} Werte, aktuell {reihe[-1][1]}"
+                  f"{'%' if ist_ziffer else ''})")
+
+            # Gesamtwohnungsbestand als eigene Kennzahl
+            bestand = extra.get("bestand_reihe") or []
+            if len(bestand) >= 3:
+                karte("Wohnen", "Wohnungsbestand", "Wohnungen",
+                      bestand, "BFS, Gebäude- und Wohnungsstatistik",
+                      url, hinweis="Gesamtzahl der Wohnungen in der Gemeinde "
+                                   "(Jahresende).")
+                print(f"  Kennzahlen: Wohnungsbestand {bestand[0][0]}\u2013"
+                      f"{bestand[-1][0]} (aktuell {bestand[-1][1]})")
+
+            # Leer stehende Wohnungen nach Zimmerzahl (Verteilung)
+            verteilung = extra.get("zimmer_verteilung") or {}
+            if verteilung and sum(verteilung.values()) > 0:
+                reihe_v = [(k, v) for k, v in verteilung.items()]
+                karte("Wohnen", "Leerstand nach Wohnungsgrösse", "Wohnungen",
+                      reihe_v, "BFS, Leerwohnungszählung (data.stats.swiss)",
+                      url, hinweis=f"Leer stehende Wohnungen nach Zimmerzahl "
+                                   f"({extra.get('neuestes_jahr','')})",
+                      extra={"typ": "verteilung"})
+                print(f"  Kennzahlen: Leerstand nach Zimmerzahl "
+                      f"({len(verteilung)} Kategorien)")
     except Exception as e:
         fehler.append(f"Leerwohnungsziffer: {e}")
 
