@@ -51,7 +51,7 @@ PRESSE_LEAD_MAX_PRO_LAUF = 40    # so viele fehlende Leads werden pro Lauf gehol
 PRESSE_RUECKFUELL_AB_JAHR = 2020
 KENNZAHLEN_AUSGABE = BASIS / "kennzahlen.js"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 7          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 8          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -1358,30 +1358,14 @@ def baue_kennzahlen() -> None:
     except Exception as e:
         fehler.append(f"Ausländer:innenanteil: {e}")
 
-    # --- Wohnen (BFS: Leerwohnungen, Neubau) ---
-    # Der Wuerfel hat Dimensionen "Anzahl Wohnräume" (Total),
-    # "Leerwohnung (Typ)" (Total) und "Anzahl/Anteil" (Ziffer waehlen).
-    # Kleine Gemeinden koennen in einzelnen Jahren "..." statt Zahlen liefern;
-    # solche Jahre werden uebersprungen statt den ganzen Abruf zu sprengen.
+    # --- Wohnen (BFS: Neubau) ---
+    # Hinweis: Die Leerwohnungsziffer (Wuerfel _101) ist ueber die STAT-TAB-
+    # Schnittstelle nicht abrufbar (dauerhaft HTTP 400) und daher nicht enthalten.
     try:
+        # Aktueller Wuerfel _107 (bis 2023). Der alte _103 endete 2012.
         reihe, url = _stattab_reihe(
-            "px-x-0902020300_101", [],
-            fest={
-                "Anzahl Wohnräume": ["anzahl wohnräume - total", "total"],
-                "Leerwohnung (Typ)": ["leerwohnung (typ) - total", "total"],
-                "Anzahl/Anteil": ["leerwohnungsziffer", "ziffer", "anteil"],
-            })
-        karte("Wohnen", "Leerwohnungsziffer", "%",
-              reihe, "BFS, STAT-TAB", url)
-        print(f"  Kennzahlen: Leerwohnungsziffer {reihe[0][0]}\u2013"
-              f"{reihe[-1][0]} ({len(reihe)} Werte, aktuell {reihe[-1][1]}%)")
-    except Exception as e:
-        fehler.append(f"Leerwohnungsziffer: {e}")
-    try:
-        # Gesamtwert heisst "Gebäudetyp - alle"
-        reihe, url = _stattab_reihe(
-            "px-x-0904030000_103", [],
-            fest={"Gebäudetyp": ["gebäudetyp - alle"]})
+            "px-x-0904030000_107", [],
+            fest={"Gebäudetyp": ["gebäudetyp - alle", "gebäudetyp - total"]})
         karte("Wohnen", "Neu erstellte Wohnungen", "Wohnungen",
               reihe, "BFS, STAT-TAB", url)
         print(f"  Kennzahlen: Neubau-Wohnungen {reihe[0][0]}\u2013"
@@ -1511,7 +1495,7 @@ def diagnose_stattab():
         ("Bevoelkerung", "px-x-0102020000_201"),
         ("Auslaenderanteil", "px-x-0102010000_104"),
         ("Leerwohnungen", "px-x-0902020300_101"),
-        ("Neubau", "px-x-0904030000_103"),
+        ("Neubau (aktuell)", "px-x-0904030000_107"),
     ]
     for name, cube in wuerfel:
         print(f"\n===== {name}: {cube} =====")
