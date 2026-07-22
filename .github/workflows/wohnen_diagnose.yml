@@ -1,0 +1,23 @@
+name: Wohnen-Umwelt-Diagnose
+
+# Nur manuell startbar. Prueft Kandidaten-Wuerfel fuer Wohnen/Umwelt:
+# Struktur, Erreichbarkeit und ob Neuhausen/Kanton/Schweiz als
+# Vergleichswerte vorhanden sind. Aendert keine Dateien.
+on:
+  workflow_dispatch:
+
+jobs:
+  wohnen-diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Repository holen
+        uses: actions/checkout@v5
+      - name: Python einrichten
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Abhaengigkeiten installieren
+        run: pip install requests beautifulsoup4 pypdf
+      - name: Wohn- und Umweltdaten pruefen
+        run: python neuhausen_daten.py --diagnose-wohnen
