@@ -1293,19 +1293,21 @@ def _leerwohnung_stattab(region_begriff: str) -> tuple:
     # Dieser Wuerfel liegt in einem Unterordner gleichen Namens; seine API-
     # Adresse ist deshalb DREISTUFIG (Cube-Name dreimal). Die kuerzeren
     # Formen liefern HTTP 400, was uns lange in die Irre fuehrte.
-    for basis in (f"{STATTAB_BASIS}/{cube}/{cube}/{cube}.px",
-                  f"{STATTAB_BASIS}/{cube}/{cube}.px",
-                  f"{STATTAB_BASIS}/{cube}.px"):
+    versuche = []
+    for stufen, basis in (("dreistufig", f"{STATTAB_BASIS}/{cube}/{cube}/{cube}.px"),
+                          ("zweistufig", f"{STATTAB_BASIS}/{cube}/{cube}.px"),
+                          ("einstufig", f"{STATTAB_BASIS}/{cube}.px")):
         try:
             r = requests.get(basis, headers=HEADERS, timeout=60)
+            versuche.append(f"{stufen}: HTTP {r.status_code}")
             if r.status_code < 400:
                 meta = r.json()
                 basis_ok = basis
                 break
-        except Exception:
-            continue
+        except Exception as e:
+            versuche.append(f"{stufen}: {e}")
     if not meta:
-        raise RuntimeError("Wuerfel nicht erreichbar")
+        raise RuntimeError("Wuerfel nicht erreichbar (" + ", ".join(versuche) + ")")
 
     # Dimensionen bestimmen
     reg_var = zeit_var = None
