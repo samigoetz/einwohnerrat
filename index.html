@@ -340,7 +340,28 @@
   .kz-dialog-erklaerung { font-size: 14px; line-height: 1.5; margin-bottom: 10px; }
   .kz-zonen-legende { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 12px 0 4px; }
   .kz-zonen-item { display: inline-flex; align-items: center; font-size: 11.5px; color: var(--grau); }
-  .kz-zonen-punkt { display: inline-block; width: 11px; height: 11px; margin-right: 5px; opacity: 0.55; }
+  .kz-vgl-einleitung { font-size: 14px; line-height: 1.5; color: var(--grau); margin: 0 0 14px; }
+  .kz-vgl-auswahl { margin-bottom: 16px; }
+  .kz-vgl-auswahl label { font-size: 14px; font-weight: 700; }
+  .kz-vgl-auswahl select {
+    font-size: 14px; padding: 7px 10px; border: 1.5px solid var(--schwarz);
+    background: var(--weiss); font-family: inherit; margin-left: 6px; cursor: pointer;
+  }
+  table.kz-vgl-t { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table.kz-vgl-t th, table.kz-vgl-t td {
+    padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--linie);
+  }
+  table.kz-vgl-t thead th {
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em;
+    border-bottom: 2px solid var(--schwarz); color: var(--schwarz);
+  }
+  table.kz-vgl-t thead th:nth-child(2) { color: var(--rot); }
+  table.kz-vgl-t td:nth-child(2) { font-weight: 700; color: var(--rot); }
+  table.kz-vgl-t td:nth-child(3), table.kz-vgl-t td:nth-child(4) { font-weight: 700; }
+  .kz-vgl-diff { color: var(--grau); }
+  @media (max-width: 640px) {
+    table.kz-vgl-t th, table.kz-vgl-t td { padding: 8px 6px; font-size: 13px; }
+  }
   .kz-dialog-wasbedeutet { font-size: 13px; line-height: 1.5; color: var(--grau); margin-bottom: 18px; padding: 10px 12px; background: #FAFAF8; border-left: 3px solid var(--rot); }
   .kz-graph { width: 100%; }
   .kz-graph svg { display: block; width: 100%; height: auto; }
@@ -566,6 +587,7 @@
   <section class="panel" id="panel-kennzahlen">
     <p class="kz-stand" id="kz-stand"></p>
     <div id="kz-bereich"><p class="leer">Wird geladen …</p></div>
+    <div id="kz-vergleich-bereich"></div>
   </section>
 
   <!-- TAB: AKTUELLES -->
@@ -650,6 +672,7 @@
 </div>
 
 <script src="kennzahlen.js"></script>
+<script src="vergleich.js"></script>
 <script src="neuhausen_daten.js"></script>
 <script>
 (function () {
@@ -2014,9 +2037,112 @@
     }
   }
 
+  function rendereVergleich() {
+    var box = $("kz-vergleich-bereich");
+    if (!box) return;
+    var vd = window.VERGLEICH_DATEN;
+    box.innerHTML = "";
+    if (!vd || !vd.gemeinden || !vd.kennzahlen_meta) return;
+    var namen = Object.keys(vd.gemeinden).filter(function (n) {
+      return n !== vd.referenz;
+    }).sort(function (a, b) { return a.localeCompare(b, "de"); });
+    if (!namen.length) return;
+
+    var block = document.createElement("div");
+    block.className = "stat-block";
+    var h = document.createElement("h2");
+    h.textContent = "Gemeindevergleich";
+    block.appendChild(h);
+
+    var einl = document.createElement("p");
+    einl.className = "kz-vgl-einleitung";
+    einl.textContent = "Neuhausen am Rheinfall im Vergleich mit einer " +
+      "ähnlich grossen Gemeinde. Wählen Sie eine der rund 20 nach " +
+      "Einwohnerzahl nächstliegenden Gemeinden.";
+    block.appendChild(einl);
+
+    // Auswahl
+    var auswahlZeile = document.createElement("div");
+    auswahlZeile.className = "kz-vgl-auswahl";
+    var label = document.createElement("label");
+    label.textContent = "Vergleichsgemeinde: ";
+    label.setAttribute("for", "kz-vgl-select");
+    var select = document.createElement("select");
+    select.id = "kz-vgl-select";
+    namen.forEach(function (n) {
+      var opt = document.createElement("option");
+      opt.value = n; opt.textContent = n;
+      select.appendChild(opt);
+    });
+    label.appendChild(select);
+    auswahlZeile.appendChild(label);
+    block.appendChild(auswahlZeile);
+
+    // Tabelle
+    var tabWrap = document.createElement("div");
+    tabWrap.id = "kz-vgl-tabelle";
+    block.appendChild(tabWrap);
+
+    var quelle = document.createElement("p");
+    quelle.className = "kz-quelle";
+    quelle.textContent = "Quelle: " + (vd.quelle || "BFS") +
+      " · aktuellster verfügbarer Wert je Kennzahl";
+    block.appendChild(quelle);
+
+    box.appendChild(block);
+
+    function fmtWert(kzKey, eintrag) {
+      if (!eintrag || eintrag.wert === undefined || eintrag.wert === null)
+        return "\u2013";
+      var m = vd.kennzahlen_meta[kzKey];
+      var einheit = m && m.einheit ? m.einheit : "";
+      return kzZahl(eintrag.wert) + (einheit === "%" ? "%" :
+        (einheit ? "\u00a0" + einheit : ""));
+    }
+
+    function zeichne(vglName) {
+      var ref = vd.gemeinden[vd.referenz] || {};
+      var vgl = vd.gemeinden[vglName] || {};
+      var keys = Object.keys(vd.kennzahlen_meta);
+      var t = document.createElement("table");
+      t.className = "kz-vgl-t";
+      var thead = document.createElement("thead");
+      thead.innerHTML = "<tr><th>Kennzahl</th><th>" + vd.referenz +
+        "</th><th>" + vglName + "</th><th>Differenz</th></tr>";
+      t.appendChild(thead);
+      var tb = document.createElement("tbody");
+      keys.forEach(function (key) {
+        var m = vd.kennzahlen_meta[key];
+        var rEintrag = ref[key], vEintrag = vgl[key];
+        var tr = document.createElement("tr");
+        var diff = "\u2013";
+        if (rEintrag && vEintrag &&
+            typeof rEintrag.wert === "number" &&
+            typeof vEintrag.wert === "number") {
+          var d = rEintrag.wert - vEintrag.wert;
+          var vz = d > 0 ? "+" : "";
+          var einh = m.einheit === "%" ? "%" : "";
+          diff = vz + kzZahl(Math.round(d * 10) / 10) + einh;
+        }
+        tr.innerHTML = "<td>" + m.name + "</td><td>" +
+          fmtWert(key, rEintrag) + "</td><td>" +
+          fmtWert(key, vEintrag) + "</td><td class=\"kz-vgl-diff\">" +
+          diff + "</td>";
+        tb.appendChild(tr);
+      });
+      t.appendChild(tb);
+      tabWrap.innerHTML = "";
+      tabWrap.appendChild(t);
+    }
+
+    select.addEventListener("change", function () { zeichne(select.value); });
+    zeichne(namen[0]);
+  }
+
   function starte() {
     messeKopfOffset();
     rendereKZ();
+    rendereVergleich();
     if (window.NEUHAUSEN_DATEN) {
       verarbeite(window.NEUHAUSEN_DATEN);
     } else {
