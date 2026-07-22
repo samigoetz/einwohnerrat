@@ -57,6 +57,13 @@ VERGLEICH_AUSGABE = BASIS / "vergleich.js"
 # aufgeschluesselt nach Anzahl Zimmer und Typ. Neuhausen = BFS-Nr 2937.
 SDMX_BASIS = "https://disseminate.stats.swiss/rest/data"
 SDMX_LEERWOHNUNG = "CH1.LWZ,DF_LWZ_1,1.0.0"
+# City Statistics (urbane Schweiz): enthaelt Neuhausen und den monatlichen
+# Netto-Mietzins pro m2 (2016-2024). WICHTIG: kein Median, sondern ein
+# durchschnittlicher Netto-Mietzins; Werte koennen statistisch unzuverlaessig
+# oder aus Datenschutzgruenden unterdrueckt sein.
+SDMX_CITYSTAT = "CH1.CITYSTAT,DF_CITYSTAT_CHURB_2"
+# Historische Gemeinnuetzig-CSV (nur 2018) ueber die BFS-Asset-Schnittstelle.
+GEMEINNUETZIG_ASSET = "https://dam-api.bfs.admin.ch/hub/api/dam/assets/16564299/master"
 # Wohnungsbestand nach Zimmerzahl (fuer die Prozent-Berechnung als Nenner).
 # Die Dataflow-Kennung wird per Diagnose am echten System verifiziert.
 SDMX_BESTAND = "CH1.GWS,DF_GWS_WHG_1,1.0.0"
@@ -1545,6 +1552,159 @@ def _leerwohnungsziffer(region_begriff: str = "neuhausen am rheinfall",
     return reihe, url, extra
 
 
+def _sdmx_struktur_dims_codelisten(agency_dataflow: str, version: str = "") -> tuple:
+    """Laedt eine SDMX-Struktur (v2-Endpunkt) und gibt (dimensionen, codelisten)
+    zurueck. dimensionen: Liste {id, position, codelist}. codelisten:
+    {codelist_id: {code: name}}. Nach dem Vorbild des BFS-Recherchepakets."""
+    import xml.etree.ElementTree as ET
+    agency, dataflow = agency_dataflow.split(",", 1) if "," in agency_dataflow \
+        else (agency_dataflow, "")
+    ver = version or "+"
+    url = (f"https://disseminate.stats.swiss/rest/v2/structure/dataflow/"
+           f"{agency}/{dataflow}/{ver}?references=all&detail=referencepartial")
+    r = requests.get(url, headers=HEADERS, timeout=90)
+    r.raise_for_status()
+    root = ET.fromstring(r.content)
+    ns = {"s": "http://www.sdmx.org/resources/sdmxml/schemas/v2_1/structure",
+          "c": "http://www.sdmx.org/resources/sdmxml/schemas/v2_1/common"}
+    codelisten = {}
+    for cl in root.findall(".//s:Codelist", ns):
+        clid = cl.attrib.get("id", "")
+        codes = {}
+        for code in cl.findall("s:Code", ns):
+            cid = code.attrib.get("id", "")
+            namen = code.findall("c:Name", ns)
+            gewaehlt = ""
+            for nm in namen:
+                lang = nm.attrib.get(
+                    "{http://www.w3.org/XML/1998/namespace}lang", "")
+                if lang in ("de", "de-CH"):
+                    gewaehlt = nm.text or ""
+                    break
+            if not gewaehlt and namen:
+                gewaehlt = namen[0].text or ""
+            codes[cid] = gewaehlt
+        if clid:
+            codelisten[clid] = codes
+    strukturen = root.findall(".//s:DataStructure", ns)
+    if not strukturen:
+        raise RuntimeError("keine DataStructure gefunden")
+    ds = strukturen[0]
+    dims = []
+    for dim in ds.findall(
+            ".//s:DataStructureComponents/s:DimensionList/s:Dimension", ns):
+        ref = dim.find(".//c:Enumeration/c:Ref", ns)
+        dims.append({
+            "id": dim.attrib.get("id", ""),
+            "position": int(dim.attrib.get("position", "999")),
+            "codelist": ref.attrib.get("id", "") if ref is not None else "",
+        })
+    dims.sort(key=lambda d: d["position"])
+    return dims, codelisten
+
+
+def _sdmx_gemeinde_schluessel(dims, codelisten, bfs_nr="2937",
+                              mess_dim_wert=None):
+    """Baut den SDMX-Datenschluessel: an der Gemeindedimension die BFS-Nr,
+    an FREQ ein 'A', sonst leer. Gibt (schluessel, geo_dim_id) zurueck."""
+    def norm(s):
+        return re.sub(r"\s+", " ", (s or "").casefold()).strip()
+    geo_dim = None
+    for dim in dims:
+        codes = codelisten.get(dim["codelist"], {})
+        if bfs_nr in codes and "neuhausen" in norm(codes.get(bfs_nr, "")):
+            geo_dim = dim["id"]
+            break
+    if geo_dim is None:
+        for dim in dims:
+            if any(t in norm(dim["id"]) for t in
+                   ("geo", "municip", "commune", "city", "region", "gde")):
+                geo_dim = dim["id"]
+                break
+    if geo_dim is None:
+        raise RuntimeError("Gemeindedimension nicht bestimmbar")
+    teile = []
+    for dim in dims:
+        if dim["id"] == geo_dim:
+            teile.append(bfs_nr)
+        elif "freq" in norm(dim["id"]):
+            teile.append("A")
+        else:
+            teile.append("")
+    return ".".join(teile), geo_dim
+
+
+def _netto_mietzins(bfs_nr="2937"):
+    """Holt den durchschnittlichen monatlichen Netto-Mietzins pro m2 fuer
+    Neuhausen aus dem City-Statistics-Datenfluss. Gibt (reihe, url, guete)
+    zurueck. guete: Anteil verwertbarer Jahre. WICHTIG: kein Median.
+    Selbstvalidierend: nur plausible Werte (1-100 CHF/m2), Unterdrueckungen
+    ('X', '...', leere) werden uebersprungen, nie geschaetzt."""
+    dims, codelisten = _sdmx_struktur_dims_codelisten(SDMX_CITYSTAT)
+    schluessel, geo = _sdmx_gemeinde_schluessel(dims, codelisten, bfs_nr)
+    url = (f"{SDMX_BASIS}/{SDMX_CITYSTAT}/{schluessel}"
+           f"?dimensionAtObservation=AllDimensions&format=csvfile"
+           f"&startPeriod=2016&endPeriod=2024")
+    kopf = dict(HEADERS)
+    kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
+    r = requests.get(url, headers=kopf, timeout=90)
+    r.raise_for_status()
+    import csv as _csv
+    import io as _io
+    text = r.content.decode("utf-8-sig", "replace")
+    zeilen = list(_csv.DictReader(_io.StringIO(text)))
+    # Mietzins-Zeilen: Messgroesse enthaelt "netto" und "miet"
+    def norm(s):
+        return (s or "").casefold()
+    werte = {}
+    roh_jahre = 0
+    for z in zeilen:
+        blob = norm(" ".join(str(v) for v in z.values()))
+        if "miet" not in blob or "netto" not in blob:
+            continue
+        jahr = (z.get("TIME_PERIOD") or "").strip()[:4]
+        wert = (z.get("OBS_VALUE") or "").strip()
+        if not re.match(r"^(19|20)\d{2}$", jahr):
+            continue
+        roh_jahre += 1
+        # Unterdrueckungen / unzuverlaessige Werte ueberspringen
+        if wert in ("", "X", "...", "*") or any(
+                s in wert for s in ("(", ")", "X")):
+            continue
+        try:
+            v = float(wert.replace(",", "."))
+        except ValueError:
+            continue
+        if 1 <= v <= 100:
+            werte[jahr] = round(v, 2)
+    reihe = sorted(werte.items())
+    guete = len(reihe) / roh_jahre if roh_jahre else 0.0
+    return reihe, url, guete
+
+
+def diagnose_mietzins():
+    """Prueft, ob der City-Statistics-Netto-Mietzins fuer Neuhausen
+    verwertbare Werte liefert. Aufruf: --diagnose-mietzins"""
+    print("===== Netto-Mietzins-Diagnose (City Statistics) =====\n")
+    try:
+        dims, codelisten = _sdmx_struktur_dims_codelisten(SDMX_CITYSTAT)
+        print(f"Dimensionen: {[d['id'] for d in dims]}")
+        schluessel, geo = _sdmx_gemeinde_schluessel(dims, codelisten)
+        print(f"Gemeindedimension: {geo}")
+        print(f"Schluessel: {schluessel}")
+        reihe, url, guete = _netto_mietzins()
+        print(f"\nURL: {url}")
+        print(f"Verwertbare Jahre: {len(reihe)} (Guete {guete:.0%})")
+        if reihe:
+            print(f"Reihe (CHF/m2/Monat): {reihe}")
+            print(f"Aktuell: {reihe[-1][1]} CHF/m2 ({reihe[-1][0]})")
+        else:
+            print("Keine verwertbaren Werte (evtl. alle unterdrueckt).")
+    except Exception as e:
+        print(f"FEHLGESCHLAGEN: {e}")
+    print("\n===== Ende Mietzins-Diagnose =====")
+
+
 def diagnose_leerwohnung():
     """Testet die Leerwohnungsdaten aus der SDMX-API.
     Aufruf: python neuhausen_daten.py --diagnose-leerwohnung"""
@@ -2329,6 +2489,10 @@ def diagnose_wohnen_umwelt():
 
 
 def main():
+    if "--diagnose-mietzins" in sys.argv:
+        diagnose_mietzins()
+        return
+
     if "--diagnose-leerwohnung" in sys.argv:
         diagnose_leerwohnung()
         return
