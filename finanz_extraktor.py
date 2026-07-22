@@ -679,6 +679,11 @@ def baue_finanz_zeitreihen(lade_funktion=None):
             "was_bedeutet": "Ein positiver Wert bedeutet, dass die Gemeinde mehr "
                             "eingenommen als ausgegeben hat.",
             "reihe": reihe,
+            # Zwei Zonen: Ueberschuss (gruen) ab 0, Fehlbetrag (rot) darunter.
+            "zonen": [
+                {"von": 0, "bis": None, "farbe": "gruen", "label": "Überschuss"},
+                {"von": None, "bis": 0, "farbe": "rot", "label": "Fehlbetrag"},
+            ],
         }
 
     return {"jahre": verwendet, "kennzahlen": kennzahlen, "quellen": quellen}
