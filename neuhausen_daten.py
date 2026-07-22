@@ -1534,21 +1534,23 @@ def _dam_download_urls(meta) -> list:
             return 0
         if ".csv" in ul:
             return 1
-        # Moderne BFS-Datenplattform: die Datei haengt am "packages"-Endpunkt
+        # Moderne BFS-Datenplattform: Datei haengt am "packages"-Endpunkt,
+        # dessen Unterpfade (/assets/...) die konkreten Dateien auflisten.
         if "/packages/" in ul:
             return 2
-        if "download" in ul:
+        if "download" in ul or "/master" in ul:
             return 3
         return 9
 
     def taugt(u):
         ul = u.lower()
-        # Reine Metadaten-, Zitat- und Bild-Endpunkte ausschliessen
         if any(x in ul for x in ("/bibtex", "/ris", "/thumbnail",
                                  "/thumbnail-source")):
             return False
-        # Der nackte Asset-Link ohne Unterpfad liefert nur JSON-Metadaten
-        if re.search(r"/assets/\d+$", ul):
+        # Der nackte Asset-Link ohne Unterpfad liefert nur JSON-Metadaten.
+        # Paket-Links (auch ohne Unterpfad) dagegen zulassen, da sie die
+        # Dateiliste enthalten.
+        if re.search(r"/assets/\d+$", ul) and "/packages/" not in ul:
             return False
         return rang(u) < 9
 
@@ -2612,30 +2614,65 @@ def diagnose_leerwohnung():
             print(f"  Download-Kandidaten aus den Metadaten ({len(urls)}):")
             for u in urls[:8]:
                 print(f"    {u[:110]}")
-            for u in urls[:6]:
-                d = requests.get(u, headers=HEADERS, timeout=120)
-                print(f"  Versuch {u[:70]}: HTTP {d.status_code}, "
-                      f"{len(d.content):,} Bytes")
-                if d.status_code < 400 and len(d.content) > 500:
+            # Paket-Ebenen vollstaendig offenlegen, um die echte Datei-
+            # struktur zu verstehen (max. 3 Ebenen tief verfolgen).
+            import json as _json
+            zu_pruefen = list(urls[:4])
+            geprueft = set()
+            ebene = 0
+            while zu_pruefen and ebene < 4:
+                ebene += 1
+                naechste = []
+                for u in zu_pruefen:
+                    if u in geprueft:
+                        continue
+                    geprueft.add(u)
+                    try:
+                        d = requests.get(u, headers=HEADERS, timeout=120)
+                    except Exception as e:
+                        print(f"  [E{ebene}] {u[:80]}: FEHLER {e}")
+                        continue
+                    ct = d.headers.get("content-type", "")
+                    print(f"  [E{ebene}] {u[:80]}: HTTP {d.status_code}, "
+                          f"{len(d.content):,} B, {ct[:40]}")
+                    if d.status_code >= 400:
+                        continue
                     if d.content[:2] == b"PK":
+                        print(f"        -> EXCEL-DATEI gefunden!")
                         import io
                         import openpyxl
                         wb = openpyxl.load_workbook(io.BytesIO(d.content),
-                                                    read_only=True,
-                                                    data_only=True)
-                        print(f"  Blaetter: {wb.sheetnames}")
-                        for name in wb.sheetnames[:2]:
-                            print(f"  --- Blatt {name!r}, erste 10 Zeilen ---")
-                            for i, row in enumerate(
-                                    wb[name].iter_rows(values_only=True)):
-                                if i >= 10:
+                                                    read_only=True, data_only=True)
+                        print(f"        Blaetter: {wb.sheetnames}")
+                        for nm in wb.sheetnames[:1]:
+                            for i, row in enumerate(wb[nm].iter_rows(values_only=True)):
+                                if i >= 6:
                                     break
-                                print(f"    {i}: {list(row)[:8]}")
-                    else:
-                        text = d.content.decode("utf-8-sig", "replace")
-                        for i, zeile in enumerate(text.splitlines()[:10]):
-                            print(f"    {i}: {zeile[:160]}")
-                    break
+                                print(f"          {i}: {list(row)[:7]}")
+                        zu_pruefen = []
+                        break
+                    probe = d.content[:4000].decode("utf-8-sig", "replace").lstrip()
+                    if probe.startswith(("{", "[")):
+                        try:
+                            obj = d.json()
+                        except Exception:
+                            continue
+                        # Kompletten JSON-Baum kompakt zeigen (erste Ebene)
+                        if isinstance(obj, dict):
+                            print(f"        JSON-Schluessel: {list(obj.keys())}")
+                            # nach Datei-Endungen und assetIds fahnden
+                            roh = _json.dumps(obj)
+                            treffer = re.findall(
+                                r'"[^"]*\.(?:xlsx|xls|csv)"', roh)
+                            if treffer:
+                                print(f"        Datei-Hinweise: {treffer[:5]}")
+                            ids = re.findall(r'"(?:damId|assetId|id)"\s*:\s*(\d+)', roh)
+                            if ids:
+                                print(f"        enthaltene IDs: {ids[:8]}")
+                        weitere = _dam_download_urls(obj)
+                        naechste.extend(weitere)
+                zu_pruefen = naechste
+            print("  (Weitere Kandidaten werden im normalen Lauf automatisch verfolgt.)")
     except Exception as e:
         print(f"  Metadaten/Datei-FEHLER: {e}")
     try:
