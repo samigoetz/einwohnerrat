@@ -51,7 +51,7 @@ PRESSE_LEAD_MAX_PRO_LAUF = 40    # so viele fehlende Leads werden pro Lauf gehol
 PRESSE_RUECKFUELL_AB_JAHR = 2020
 KENNZAHLEN_AUSGABE = BASIS / "kennzahlen.js"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 15          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 17          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -1534,13 +1534,27 @@ def _dam_download_urls(meta) -> list:
             return 0
         if ".csv" in ul:
             return 1
-        if "master" in ul or "download" in ul or "dam-api" in ul:
+        # Moderne BFS-Datenplattform: die Datei haengt am "packages"-Endpunkt
+        if "/packages/" in ul:
             return 2
-        return 3
+        if "download" in ul:
+            return 3
+        return 9
+
+    def taugt(u):
+        ul = u.lower()
+        # Reine Metadaten-, Zitat- und Bild-Endpunkte ausschliessen
+        if any(x in ul for x in ("/bibtex", "/ris", "/thumbnail",
+                                 "/thumbnail-source")):
+            return False
+        # Der nackte Asset-Link ohne Unterpfad liefert nur JSON-Metadaten
+        if re.search(r"/assets/\d+$", ul):
+            return False
+        return rang(u) < 9
 
     eindeutig = []
     for u in sorted(gefunden, key=rang):
-        if u not in eindeutig and rang(u) < 3:
+        if u not in eindeutig and taugt(u):
             eindeutig.append(u)
     return eindeutig
 
@@ -1589,26 +1603,47 @@ def _leerwohnung_bfs_asset(region_begriff: str) -> tuple:
 
     inhalt = None
     letzte_fehler = []
-    for url in kandidaten[:6]:
+    warteschlange = list(kandidaten[:6])
+    besucht = set()
+    while warteschlange and inhalt is None:
+        url = warteschlange.pop(0)
+        if url in besucht:
+            continue
+        besucht.add(url)
         try:
             rd = requests.get(url, headers=HEADERS, timeout=120)
-            if rd.status_code < 400 and len(rd.content) > 500:
-                # Eignung pruefen: Excel-Signatur oder CSV-artiger Text.
-                # JSON-Antworten (API-Links) werden uebersprungen, damit ein
-                # spaeterer Kandidat noch zum Zug kommt.
-                if rd.content[:2] == b"PK":
-                    inhalt = rd.content
-                    break
-                probe = rd.content[:2000].decode("utf-8-sig", "replace").lstrip()
-                if not probe.startswith(("{", "[", "<")) \
-                        and (";" in probe or "," in probe):
-                    inhalt = rd.content
-                    break
-                letzte_fehler.append(f"{url[:70]}: kein Tabellenformat")
-                continue
-            letzte_fehler.append(f"{url[:70]}: HTTP {rd.status_code}")
         except Exception as e:
             letzte_fehler.append(f"{url[:70]}: {e}")
+            continue
+        if rd.status_code >= 400:
+            letzte_fehler.append(f"{url[:70]}: HTTP {rd.status_code}")
+            continue
+        if rd.content[:2] == b"PK":                     # Excel (Zip-Signatur)
+            if len(rd.content) > 300:
+                inhalt = rd.content
+                break
+            letzte_fehler.append(f"{url[:70]}: Excel zu klein")
+            continue
+        probe = rd.content[:3000].decode("utf-8-sig", "replace").lstrip()
+        if probe.startswith(("{", "[")):
+            # JSON: das Datenpaket mit den echten Dateilinks. Groesse egal.
+            try:
+                weitere = _dam_download_urls(rd.json())
+                for w in reversed(weitere):
+                    if w not in besucht and w not in warteschlange:
+                        warteschlange.insert(0, w)
+            except Exception:
+                pass
+            letzte_fehler.append(f"{url[:70]}: JSON (Paket verfolgt)")
+            continue
+        if len(rd.content) > 40 and (";" in probe or "," in probe) \
+                and "\n" in probe:                       # CSV/Text mit Zeilen
+            inhalt = rd.content
+            break
+        letzte_fehler.append(f"{url[:70]}: unbekanntes Format")
+    if inhalt is None:
+        raise RuntimeError("kein Download moeglich (" +
+                           "; ".join(letzte_fehler[:4]) + ")")
     if inhalt is None:
         raise RuntimeError("kein Download moeglich (" +
                            "; ".join(letzte_fehler[:3]) + ")")
