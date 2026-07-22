@@ -1730,9 +1730,87 @@ def vergleichsgemeinden(min_ew=9500, max_ew=18000):
     print(f"\n===== Ende Liste ({len(ergebnisse)} Gemeinden) =====")
 
 
+def diagnose_wohnen_umwelt():
+    """Prueft Kandidaten-Wuerfel fuer Wohnen/Umwelt auf drei Dinge:
+    1) Ist der Wuerfel erreichbar? 2) Wie ist seine Struktur (Dimensionen)?
+    3) Sind Neuhausen UND Kanton SH UND Schweiz als Vergleichswerte abrufbar?
+    Aufruf: python neuhausen_daten.py --diagnose-wohnen"""
+    # Kandidaten-Wuerfel (aus BFS-Recherche). Nummern koennen sich aendern;
+    # die Diagnose zeigt bei Fehler, welche nicht erreichbar sind.
+    kandidaten = [
+        ("Wohnungsbestand nach Zimmerzahl", "px-x-0902020200_102"),
+        ("Bewohnte Wohnungen (Bewohnertyp Miete/Eigentum)", "px-x-0903020000_123"),
+        ("Neubau nach Zimmerzahl", "px-x-0904030000_105"),
+        ("Arealstatistik Bodennutzung (Kandidat)", "px-x-0202020000_101"),
+    ]
+    for name, cube in kandidaten:
+        print(f"\n{'=' * 60}")
+        print(f"{name}: {cube}")
+        print("=" * 60)
+        # 1) Struktur laden (mit URL-Fallback wie bei den anderen Wuerfeln)
+        meta = None
+        for form in (f"{STATTAB_BASIS}/{cube}/{cube}.px",
+                     f"{STATTAB_BASIS}/{cube}.px"):
+            try:
+                r = requests.get(form, headers=HEADERS, timeout=40)
+                if r.status_code < 400:
+                    meta = r.json()
+                    break
+            except Exception:
+                continue
+        if not meta:
+            print("  NICHT ERREICHBAR (alle URL-Formen HTTP-Fehler)")
+            continue
+
+        # 2) Dimensionen zeigen (gekuerzt bei grossen Listen)
+        reg_var = None
+        zeit_var = None
+        for var in meta["variables"]:
+            code = var["code"]
+            texte = var.get("valueTexts", [])
+            ist_region = ("gemeinde" in code.lower() or "kanton" in code.lower()
+                          or "region" in code.lower())
+            if ist_region:
+                reg_var = var
+            if var.get("time"):
+                zeit_var = var
+            if ist_region or len(texte) > 20:
+                print(f"  [{code}] ({len(texte)} Werte) Beispiele: "
+                      f"{list(zip(var['values'][:3], texte[:3]))}")
+            else:
+                print(f"  [{code}] ({len(texte)} Werte):")
+                for w, t in zip(var["values"], texte):
+                    print(f"       {w!r} = {t!r}")
+
+        # 3) Vergleichswerte: Neuhausen, Kanton SH, Schweiz suchen
+        if reg_var:
+            print("  --- Vergleichsregionen im Wuerfel vorhanden? ---")
+            def suche(begriff):
+                for w, t in zip(reg_var["values"], reg_var["valueTexts"]):
+                    if begriff in t.lower():
+                        return (w, t.strip())
+                return None
+            for label, begriff in (("Neuhausen", "neuhausen am rheinfall"),
+                                    ("Kanton Schaffhausen", "schaffhausen"),
+                                    ("Schweiz", "schweiz")):
+                fund = suche(begriff)
+                zeichen = "ja" if fund else "NEIN"
+                extra = f" -> {fund}" if fund else ""
+                print(f"       {label}: {zeichen}{extra}")
+        if zeit_var:
+            print(f"  Neuestes Jahr: {zeit_var['valueTexts'][-1]}")
+    print(f"\n{'=' * 60}\nEnde Wohnen/Umwelt-Diagnose\n{'=' * 60}")
+    print("Hinweis: 'Vergleichsregionen vorhanden' zeigt, ob spaeter ein "
+          "Vergleich Neuhausen/Kanton/Schweiz moeglich ist.")
+
+
 def main():
     if "--diagnose-stattab" in sys.argv:
         diagnose_stattab()
+        return
+
+    if "--diagnose-wohnen" in sys.argv:
+        diagnose_wohnen_umwelt()
         return
 
     if "--vergleichsgemeinden" in sys.argv:
