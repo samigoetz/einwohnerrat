@@ -61,7 +61,7 @@ SDMX_LEERWOHNUNG = "CH1.LWZ,DF_LWZ_1,1.0.0"
 # Die Dataflow-Kennung wird per Diagnose am echten System verifiziert.
 SDMX_BESTAND = "CH1.GWS,DF_GWS_WHG_1,1.0.0"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 21          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 22          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -1296,26 +1296,166 @@ def _sdmx_csv(dataflow: str, schluessel: str, timeout: int = 90) -> list:
     return list(leser), url
 
 
-def _leerwohnung_bestand(bfs_nr: str = "2937") -> dict:
-    """Holt den Gesamtwohnungsbestand je Jahr aus der GWS-SDMX-Quelle.
-    Gibt {jahr: bestand} zurueck. Bei Fehlschlag leeres dict, damit die
-    Prozentberechnung optional bleibt und die Anzahl-Kennzahl trotzdem steht."""
+def _sdmx_struktur_dimensionen(struktur_id: str) -> list:
+    """Laedt die Dimensionsliste einer SDMX-Datenstruktur (DSD).
+    Gibt die Dimensions-IDs in Reihenfolge zurueck."""
+    import re as _re
+    url = (f"https://disseminate.stats.swiss/rest/datastructure/CH1.GWS/"
+           f"{struktur_id}/1.0.0?references=children")
+    r = requests.get(url, headers=HEADERS, timeout=60)
+    r.raise_for_status()
+    txt = r.content.decode("utf-8", "replace")
+    # Dimensionen mit Position; TimeDimension separat
+    dims = _re.findall(
+        r'<structure:Dimension[^>]*\bid="([^"]+)"', txt)
+    if not dims:
+        dims = _re.findall(r'<Dimension[^>]*\bid="([^"]+)"', txt)
+    return dims
+
+
+# Kandidaten fuer die Gemeinde-Regionsdimension (nach Haeufigkeit im BFS-SDMX)
+_GEMEINDE_DIMS = ("GR_KT_GDE", "GDENR", "GEO", "REGION", "GEBIET", "MUNICIPALITY")
+
+
+def _leerwohnung_bestand(bfs_nr: str = "2937") -> tuple:
+    """Findet automatisch den GWS-Datenfluss mit Gemeindedaten und holt den
+    Gesamtwohnungsbestand je Jahr fuer die Gemeinde. Durchsucht die
+    DF_GWS_REG-Datenfluesse, prueft deren Struktur auf eine gemeindefaehige
+    Dimension und nimmt den ersten, der fuer die BFS-Nr echte Werte liefert.
+
+    Gibt (bestand_dict, dataflow_id) zurueck; bei Misserfolg ({}, "").
+    Robust: nur Totalzeilen (alle Bauperioden/Kategorien/Zimmer/Flaechen),
+    plausible Bestandswerte (10-100000)."""
+    import re as _re
+
+    # 1) Alle GWS-Dataflows samt Struktur-Referenz aus dem Register holen
     try:
-        zeilen, _ = _sdmx_csv(SDMX_BESTAND, f"{bfs_nr}....A")
+        rreg = requests.get(
+            "https://disseminate.stats.swiss/rest/dataflow/CH1.GWS",
+            headers=HEADERS, timeout=60)
+        rreg.raise_for_status()
+        reg_txt = rreg.content.decode("utf-8", "replace")
     except Exception:
-        return {}
-    bestand = {}
-    for z in zeilen:
-        jahr = (z.get("TIME_PERIOD") or "").strip()
-        wert = (z.get("OBS_VALUE") or "").strip()
-        # nur Totalzeilen (keine Aufschluesselung nach Zimmerzahl)
-        zimmer = (z.get("WOHN_ANZAHL") or z.get("ROOMS") or "_T").strip()
-        if jahr and wert and zimmer in ("_T", "", "T"):
+        return {}, ""
+
+    # Dataflow-ID -> Struktur-ID (DSD). Mehrere XML-Formen abdecken.
+    df_zu_dsd = {}
+    # Form A: Dataflow-Block mit eingebettetem Structure-Ref
+    for m in _re.finditer(
+            r'<(?:structure:)?Dataflow[^>]*\bid="(DF_GWS_[^"]+)"(.*?)'
+            r'</(?:structure:)?Dataflow>', reg_txt, _re.DOTALL):
+        dfid, block = m.group(1), m.group(2)
+        ref = _re.search(r'\bid="(DSD_GWS_[^"]+)"', block)
+        if ref:
+            df_zu_dsd[dfid] = ref.group(1)
+    # Form B: falls kein Block matchte, DF- und DSD-IDs paarweise annehmen
+    if not df_zu_dsd:
+        for dfid in _re.findall(r'\bid="(DF_GWS_REG\d)"', reg_txt):
+            df_zu_dsd[dfid] = dfid.replace("DF_", "DSD_")
+
+    # 2) Fuer jeden Dataflow die Dimensionen pruefen; nur die mit
+    #    gemeindefaehiger Regionsdimension weiterverfolgen.
+    for dfid, dsd in df_zu_dsd.items():
+        try:
+            dims = _sdmx_struktur_dimensionen(dsd)
+        except Exception:
+            continue
+        # Regionsdimension finden
+        region_pos = None
+        for i, d in enumerate(dims):
+            if d.upper() in _GEMEINDE_DIMS:
+                region_pos = i
+                break
+        if region_pos is None:
+            continue   # nur Kantonsebene o. Ae., ueberspringen
+
+        # 3) Datenschluessel bauen: an Regionsposition die BFS-Nr, sonst leer.
+        #    Zeitdimension nicht mitzaehlen (die steht separat).
+        n = len(dims)
+        teile = ["" for _ in range(n)]
+        teile[region_pos] = str(bfs_nr)
+        schluessel = ".".join(teile)
+        for frq in ("A", ""):
+            sk = schluessel
+            # FREQ ist oft die erste Dimension; wenn vorhanden auf A setzen
+            if "FREQ" in dims:
+                fpos = dims.index("FREQ")
+                t2 = teile[:]
+                t2[fpos] = frq or "A"
+                sk = ".".join(t2)
+            url = (f"{SDMX_BASIS}/CH1.GWS,{dfid},1.0.0/{sk}"
+                   f"?dimensionAtObservation=AllDimensions")
             try:
-                bestand[jahr] = int(round(float(wert)))
-            except ValueError:
+                kopf = dict(HEADERS)
+                kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
+                r = requests.get(url, headers=kopf, timeout=90)
+                # Leere SDMX-Antworten sind sehr kurz; echte Daten haben
+                # mindestens eine Kopf- und Datenzeile.
+                if r.status_code >= 400 or len(r.content) < 80:
+                    continue
+                bestand = _bestand_aus_csv(
+                    r.content.decode("utf-8-sig", "replace"))
+                if len(bestand) >= 3:
+                    return bestand, dfid
+            except Exception:
                 continue
-    return bestand
+    return {}, ""
+
+
+def _bestand_aus_csv(text: str) -> dict:
+    """Summiert aus einer GWS-CSV den Gesamtwohnungsbestand je Jahr.
+    Nimmt nur Totalzeilen (alle Aufschluesselungs-Dimensionen auf Total '_T'
+    oder gleichwertig), um Doppelzaehlung zu vermeiden. Faellt, wenn keine
+    reinen Totalzeilen existieren, auf die Summe je Jahr ueber die
+    feinste Vollpartition zurueck."""
+    import csv
+    import io
+    zeilen = list(csv.DictReader(io.StringIO(text)))
+    if not zeilen:
+        return {}
+    # Aufschluesselungs-Dimensionen (alles ausser Zeit/Wert/Struktur/Region)
+    ignor = {"TIME_PERIOD", "OBS_VALUE", "STRUCTURE", "STRUCTURE_ID",
+             "STRUCTURE_NAME", "ACTION", "FREQ"}
+    spalten = [k for k in zeilen[0].keys()
+               if k and k.upper() == k and k not in ignor
+               and not k.startswith("DIFF") and k not in ("DECIMALS",
+               "OBS_STATUS")]
+    # Regionsspalte ausschliessen (sie ist konstant = unsere Gemeinde)
+    aufschluessel = [k for k in spalten
+                     if k.upper() not in _GEMEINDE_DIMS
+                     and not k.lower().startswith("grossregion")]
+
+    def ist_total(row):
+        for k in aufschluessel:
+            v = (row.get(k) or "").strip()
+            if v and v not in ("_T", "T", "_Z", "TOTAL", "0"):
+                return False
+        return True
+
+    bestand = {}
+    total_zeilen = [z for z in zeilen if ist_total(z)]
+    quelle = total_zeilen if total_zeilen else zeilen
+    aggregiert = not total_zeilen
+    for z in quelle:
+        jahr = (z.get("TIME_PERIOD") or "").strip()[:4]
+        wert = (z.get("OBS_VALUE") or "").strip()
+        if not (_re_jahr(jahr) and wert):
+            continue
+        try:
+            v = float(wert)
+        except ValueError:
+            continue
+        if aggregiert:
+            bestand[jahr] = bestand.get(jahr, 0) + v
+        else:
+            bestand[jahr] = v
+    # Plausibilisierung
+    return {j: int(round(v)) for j, v in bestand.items()
+            if 10 <= v <= 100000}
+
+
+def _re_jahr(s: str) -> bool:
+    return bool(re.match(r"^(19|20)\d{2}$", s or ""))
 
 
 def _leerwohnungsziffer(region_begriff: str = "neuhausen am rheinfall",
@@ -1375,8 +1515,8 @@ def _leerwohnungsziffer(region_begriff: str = "neuhausen am rheinfall",
             except ValueError:
                 continue
 
-    # 3) Gesamtbestand fuer die Prozent-Ziffer
-    bestand = _leerwohnung_bestand(bfs_nr)
+    # 3) Gesamtbestand fuer die Prozent-Ziffer (Quelle wird automatisch gesucht)
+    bestand, bestand_df = _leerwohnung_bestand(bfs_nr)
 
     # 4) Reihe bauen: Ziffer in % wenn Bestand vorhanden, sonst Anzahl
     anzahl_reihe = sorted((j, v) for j, v in anzahl.items())
@@ -1397,6 +1537,7 @@ def _leerwohnungsziffer(region_begriff: str = "neuhausen am rheinfall",
     extra = {
         "anzahl_reihe": anzahl_reihe,
         "bestand_reihe": sorted(bestand.items()),
+        "bestand_quelle": bestand_df,
         "zimmer_verteilung": verteilung,
         "neuestes_jahr": neuestes,
         "ist_ziffer": ist_ziffer,
@@ -1423,97 +1564,24 @@ def diagnose_leerwohnung():
     except Exception as e:
         print(f"FEHLGESCHLAGEN: {e}")
 
-    print("\n--- Bestand (GWS) separat pruefen ---")
-    # Mehrere plausible Dataflow-Kennungen fuer den Wohnungsbestand testen,
-    # da die genaue Kennung noch nicht verifiziert ist.
-    kandidaten = [
-        "CH1.GWS,DF_GWS_WHG_1,1.0.0",
-        "CH1.GWS,DF_GWS_WHG,1.0.0",
-        "CH1.BEW,DF_BEW_WHG_1,1.0.0",
-        "CH1.GWS,DF_GWS_BUILDING_DWELLING,1.0.0",
-        "CH1.STATBL,DF_WOHNUNGEN,1.0.0",
-    ]
-    for df in kandidaten:
-        url = (f"{SDMX_BASIS}/{df}/2937...A"
-               f"?dimensionAtObservation=AllDimensions")
-        try:
-            kopf = dict(HEADERS)
-            kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
-            r = requests.get(url, headers=kopf, timeout=40)
-            status = r.status_code
-            groesse = len(r.content)
-            print(f"  {df}: HTTP {status}, {groesse:,} Bytes")
-            if status < 400 and groesse > 200:
-                kopfzeile = r.content.decode("utf-8-sig", "replace").split("\n")[0]
-                print(f"    Spalten: {kopfzeile[:120]}")
-        except Exception as e:
-            print(f"  {df}: FEHLER {str(e)[:60]}")
-    print("  (Die antwortende Kennung wird als SDMX_BESTAND eingetragen.)")
-
-    print("\n--- GWS-Datenfluesse REG1-REG7 auf Wohnungsbestand pruefen ---")
-    # Zuerst die Klarnamen der REG-Datenfluesse aus dem Register holen.
+    print("\n--- Gesamtwohnungsbestand (automatische Quellensuche) ---")
     try:
-        rreg = requests.get(
-            "https://disseminate.stats.swiss/rest/dataflow/CH1.GWS",
-            headers=HEADERS, timeout=40)
-        if rreg.status_code < 400:
-            txt = rreg.content.decode("utf-8", "replace")
-            import re as _re
-            # Bloecke je Dataflow: id="DF_GWS_REGn" ... <Name ...>Text</Name>
-            for m in _re.finditer(
-                    r'id="(DF_GWS_REG\d)"[^>]*>(.*?)</structure:Dataflow>',
-                    txt, _re.DOTALL):
-                dfid = m.group(1)
-                namen = _re.findall(r'>([^<]{8,90})</(?:common:)?Name>', m.group(2))
-                deutsch = namen[0] if namen else "?"
-                print(f"  {dfid}: {deutsch[:80]}")
+        bestand, df = _leerwohnung_bestand("2937")
+        if bestand:
+            js = sorted(bestand.items())
+            print(f"  Quelle gefunden: {df}")
+            print(f"  Bestand: {len(js)} Jahre, {js[0]} ... {js[-1]}")
+            # Beispiel-Ziffer fuer das neueste gemeinsame Jahr
+            try:
+                reihe, _, extra = _leerwohnungsziffer()
+                if extra.get("ist_ziffer"):
+                    print(f"  Berechnete Ziffer (neuestes Jahr): {reihe[-1]}")
+            except Exception:
+                pass
+        else:
+            print("  Keine gemeindefaehige Bestand-Quelle gefunden.")
     except Exception as e:
-        print(f"  Register-Namen FEHLER: {str(e)[:60]}")
-
-    print("\n--- DF_GWS_REG6 (Wohnungsbestand) fuer Neuhausen 2937 ---")
-    # REG6 = "Wohnungen nach Kanton, Gebaeudekategorie, Anzahl Zimmer,
-    # Wohnungsflaeche und Bauperiode" -> Gesamtwohnungsbestand.
-    # Zuerst die Struktur (Dimensionen) laden, um die richtige Schluesselform
-    # und die Gemeinde-Dimension zu kennen.
-    df6 = "CH1.GWS,DF_GWS_REG6,1.0.0"
-    try:
-        rs = requests.get(
-            f"https://disseminate.stats.swiss/rest/datastructure/CH1.GWS/"
-            f"DSD_GWS_REG6/1.0.0?references=children",
-            headers=HEADERS, timeout=40)
-        print(f"  Struktur: HTTP {rs.status_code}, {len(rs.content):,} B")
-        if rs.status_code < 400:
-            import re as _re
-            txt = rs.content.decode("utf-8", "replace")
-            dims = _re.findall(r'<structure:Dimension[^>]*id="([^"]+)"', txt)
-            if not dims:
-                dims = _re.findall(r'id="([A-Z_]+)"[^>]*position=', txt)
-            print(f"  Dimensionen (Reihenfolge): {dims}")
-    except Exception as e:
-        print(f"  Struktur-FEHLER: {str(e)[:60]}")
-
-    # Dann Datenabruf mit verschiedenen Wildcard-Laengen, bis Werte kommen.
-    for anzahl_punkte in range(3, 9):
-        muster = "2937" + "." * anzahl_punkte + "A"
-        url = (f"{SDMX_BASIS}/{df6}/{muster}"
-               f"?dimensionAtObservation=AllDimensions")
-        try:
-            kopf = dict(HEADERS)
-            kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
-            r = requests.get(url, headers=kopf, timeout=45)
-            if r.status_code < 400 and len(r.content) > 200:
-                txt = r.content.decode("utf-8-sig", "replace")
-                zeilen = [z for z in txt.split("\n") if z.strip()]
-                print(f"  [{muster}]: HTTP 200, {len(zeilen)} Zeilen")
-                print(f"    Spalten: {zeilen[0][:150]}")
-                for zz in zeilen[1:5]:
-                    print(f"    > {zz[:150]}")
-                break
-            else:
-                print(f"  [{muster}]: HTTP {r.status_code}, "
-                      f"{len(r.content)} B (leer/kein Treffer)")
-        except Exception as e:
-            print(f"  [{muster}]: FEHLER {str(e)[:50]}")
+        print(f"  Bestand-FEHLER: {e}")
     print("\n===== Ende Leerwohnungs-Diagnose =====")
 
 
@@ -1813,8 +1881,9 @@ def baue_kennzahlen() -> None:
             if len(bestand) >= 3:
                 karte("Wohnen", "Wohnungsbestand", "Wohnungen",
                       bestand, "BFS, Gebäude- und Wohnungsstatistik",
-                      url, hinweis="Gesamtzahl der Wohnungen in der Gemeinde "
-                                   "(Jahresende).")
+                      url, hinweis="Gesamtzahl aller Wohnungen in der Gemeinde "
+                                   "(Jahresende), inklusive der neu erstellten. "
+                                   "Zeigt das Gesamtwachstum des Wohnraums.")
                 print(f"  Kennzahlen: Wohnungsbestand {bestand[0][0]}\u2013"
                       f"{bestand[-1][0]} (aktuell {bestand[-1][1]})")
 
