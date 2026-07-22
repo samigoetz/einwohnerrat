@@ -51,7 +51,7 @@ PRESSE_LEAD_MAX_PRO_LAUF = 40    # so viele fehlende Leads werden pro Lauf gehol
 PRESSE_RUECKFUELL_AB_JAHR = 2020
 KENNZAHLEN_AUSGABE = BASIS / "kennzahlen.js"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 10          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 11          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -1266,6 +1266,114 @@ def _wachstum(reihe: list, ab_jahr: int):
     return round((ab[-1][1] / ab[0][1] - 1) * 100, 1)
 
 
+def _leerwohnungsziffer(region_begriff: str = "neuhausen am rheinfall") -> tuple:
+    """Holt die Leerwohnungsziffer-Zeitreihe fuer eine Gemeinde direkt aus dem
+    BFS-Wuerfel px-x-0902020300_101. Robust gegen: mehrere URL-Formen,
+    Platzhalter '...' (Daten nicht verfuegbar), verschachtelte Jahrescodes.
+    Gibt ([(jahr, ziffer), ...], quellen_url) zurueck."""
+    cube = "px-x-0902020300_101"
+    seite = f"{STATTAB_SEITE}/{cube}/{cube}.px"
+    # Metadaten laden, mehrere URL-Formen probieren
+    meta = None
+    basis_ok = None
+    for basis in (f"{STATTAB_BASIS}/{cube}/{cube}.px",
+                  f"{STATTAB_BASIS}/{cube}.px"):
+        try:
+            r = requests.get(basis, headers=HEADERS, timeout=60)
+            if r.status_code < 400:
+                meta = r.json()
+                basis_ok = basis
+                break
+        except Exception:
+            continue
+    if not meta:
+        raise RuntimeError("Wuerfel nicht erreichbar")
+
+    # Dimensionen bestimmen
+    reg_var = zeit_var = None
+    dim_fest = {}   # code -> gewaehlter Wert
+    for var in meta["variables"]:
+        code = var["code"]
+        texte = var.get("valueTexts", [])
+        werte = var.get("values", [])
+        cl = code.lower()
+        if "gemeinde" in cl or "region" in cl or "kanton" in cl:
+            reg_var = var
+        elif var.get("time"):
+            zeit_var = var
+        elif "wohnräume" in cl or "wohnraeume" in cl:
+            # Total waehlen
+            dim_fest[code] = _waehle_total(werte, texte)
+        elif "leerwohnung" in cl and "typ" in cl:
+            dim_fest[code] = _waehle_total(werte, texte)
+        elif "anzahl" in cl and "anteil" in cl:
+            # die Ziffer (Prozent) waehlen, nicht die absolute Anzahl
+            dim_fest[code] = _waehle_begriff(
+                werte, texte, ["leerwohnungsziffer", "ziffer", "anteil"])
+        else:
+            dim_fest[code] = _waehle_total(werte, texte)
+
+    # Region Neuhausen finden
+    reg_code = None
+    for w, t in zip(reg_var["values"], reg_var["valueTexts"]):
+        if region_begriff in t.lower():
+            reg_code = w
+            break
+    if reg_code is None:
+        raise RuntimeError("Region nicht gefunden")
+
+    # Alle Jahre abfragen
+    q = [{"code": reg_var["code"], "selection": {"filter": "item", "values": [reg_code]}}]
+    for code, wert in dim_fest.items():
+        q.append({"code": code, "selection": {"filter": "item", "values": [wert]}})
+    q.append({"code": zeit_var["code"],
+              "selection": {"filter": "item", "values": zeit_var["values"]}})
+
+    r = requests.post(basis_ok, json={"query": q,
+                      "response": {"format": "json-stat2"}},
+                      headers=HEADERS, timeout=90)
+    r.raise_for_status()
+    js = r.json()
+    werte = js.get("value", [])
+    # Jahr-Dimension: Position -> Jahr-Label
+    zeit_dim = js["dimension"][zeit_var["code"]]["category"]
+    idx = zeit_dim["index"]          # code -> position
+    labels = zeit_dim.get("label", {})
+    pos_zu_jahr = {}
+    for code, pos in idx.items():
+        jahr = str(labels.get(code, code))[:4]
+        if re.match(r"^\d{4}$", jahr):
+            pos_zu_jahr[pos] = jahr
+
+    reihe = []
+    for pos in range(len(werte)):
+        w = werte[pos]
+        # Nur echte Zahlen (Platzhalter '...' kommt als None oder String)
+        if isinstance(w, (int, float)) and pos in pos_zu_jahr:
+            reihe.append((pos_zu_jahr[pos], round(float(w), 2)))
+    reihe.sort()
+    return reihe, seite
+
+
+def _waehle_total(werte, texte):
+    """Waehlt den Total-Wert einer Dimension (per Label 'total' oder 'alle')."""
+    for w, t in zip(werte, texte):
+        tl = t.lower()
+        if "total" in tl or "- alle" in tl or "alle" == tl.strip():
+            return w
+    return werte[0] if werte else None
+
+
+def _waehle_begriff(werte, texte, begriffe):
+    """Waehlt den Wert, dessen Label einen der Begriffe enthaelt."""
+    for w, t in zip(werte, texte):
+        tl = t.lower()
+        for b in begriffe:
+            if b in tl:
+                return w
+    return werte[0] if werte else None
+
+
 def baue_kennzahlen() -> None:
     # Zwischenspeicher: hoechstens einmal pro Woche neu abfragen
     if KENNZAHLEN_AUSGABE.exists():
@@ -1363,8 +1471,8 @@ def baue_kennzahlen() -> None:
         fehler.append(f"Ausländer:innenanteil: {e}")
 
     # --- Wohnen (BFS: Neubau) ---
-    # Hinweis: Die Leerwohnungsziffer (Wuerfel _101) ist ueber die STAT-TAB-
-    # Schnittstelle nicht abrufbar (dauerhaft HTTP 400) und daher nicht enthalten.
+    # Hinweis: Die Leerwohnungsziffer (Wuerfel _101) wird weiter unten ueber
+    # einen direkten, robusten Abruf geholt.
     try:
         # Aktueller Wuerfel _107 (bis 2023). Der alte _103 endete 2012.
         reihe, url = _stattab_reihe(
@@ -1415,6 +1523,24 @@ def baue_kennzahlen() -> None:
                   f"(haeufigste {spitze[0]} mit {spitze[1]}%)")
     except Exception as e:
         fehler.append(f"Neubau nach Zimmerzahl: {e}")
+
+    # --- Leerwohnungsziffer (BFS Leerwohnungszaehlung, Vollerhebung) ---
+    # Robuster Direktabruf: probiert mehrere URL-Formen, verkraftet den
+    # BFS-Platzhalter "..." (Daten nicht verfuegbar) und die verschachtelte
+    # Jahrescodierung. Fuer kleine Gemeinden schwankt die Ziffer stark,
+    # daher der Hinweis.
+    try:
+        reihe, url = _leerwohnungsziffer()
+        if reihe:
+            karte("Wohnen", "Leerwohnungsziffer", "%",
+                  reihe, "BFS, Leerwohnungszählung", url,
+                  hinweis="Anteil leer stehender, am Markt angebotener "
+                          "Wohnungen (Stichtag 1. Juni). Bei kleinen Gemeinden "
+                          "von Jahr zu Jahr stark schwankend.")
+            print(f"  Kennzahlen: Leerwohnungsziffer {reihe[0][0]}\u2013"
+                  f"{reihe[-1][0]} ({len(reihe)} Werte, aktuell {reihe[-1][1]}%)")
+    except Exception as e:
+        fehler.append(f"Leerwohnungsziffer: {e}")
 
     # --- Vergleich mit Kanton und Schweiz (Wachstum in Prozent) ---
     for name, cube, festl, festd, ab_jahr in (
