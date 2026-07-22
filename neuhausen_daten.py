@@ -51,7 +51,7 @@ PRESSE_LEAD_MAX_PRO_LAUF = 40    # so viele fehlende Leads werden pro Lauf gehol
 PRESSE_RUECKFUELL_AB_JAHR = 2020
 KENNZAHLEN_AUSGABE = BASIS / "kennzahlen.js"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 14          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 15          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -1278,9 +1278,9 @@ def _leerwohnungsziffer(region_begriff: str = "neuhausen am rheinfall") -> tuple
         return _leerwohnung_stattab(region_begriff)
     except Exception as e1:
         try:
-            return _leerwohnung_opendata(region_begriff)
+            return _leerwohnung_bfs_asset(region_begriff)
         except Exception as e2:
-            raise RuntimeError(f"STAT-TAB: {e1} / opendata.swiss: {e2}")
+            raise RuntimeError(f"STAT-TAB: {e1} / BFS-Asset: {e2}")
 
 
 def _leerwohnung_stattab(region_begriff: str) -> tuple:
@@ -1394,8 +1394,326 @@ def _waehle_begriff(werte, texte, begriffe):
     return werte[0] if werte else None
 
 
-LEERWOHNUNG_CKAN = ("https://opendata.swiss/api/3/action/package_show"
-                    "?id=leerwohnungsziffer-nach-gemeinde")
+# Offizieller Maschinenbezug der BFS-Dateien (Asset-Schnittstelle).
+# Das bekannte Asset ist die Gemeindetabelle der Leerwohnungszaehlung
+# (Ausgabe 2025). Ueber seine Metadaten wird die stabile Bestellnummer
+# ermittelt, mit der kuenftige Jahrgaenge automatisch gefunden werden.
+DAM_API = "https://dam-api.bfs.admin.ch/hub/api/dam/assets"
+LEERWOHNUNG_ASSET_BEKANNT = "36093199"
+
+
+def _leerwohnung_langformat(zeilen, region_begriff):
+    """Parst das lange Format: eine Zeile pro Gemeinde und Jahr, mit
+    Spaltenkopf. Bestimmt Jahr- und Wertspalte aus den Koepfen; die
+    Wertspalte muss eindeutig sein (Kopf mit 'ziffer'/'quote'/'anteil'),
+    sonst Abbruch, damit nie Anzahlen mit Ziffern verwechselt werden."""
+    kopf_idx = jahr_sp = None
+    for i, row in enumerate(zeilen[:10]):
+        for j, zelle in enumerate(row):
+            t = str(zelle or "").lower()
+            if t in ("jahr", "year", "periode", "period") or "jahr" == t[:4]:
+                kopf_idx, jahr_sp = i, j
+                break
+        if kopf_idx is not None:
+            break
+    if kopf_idx is None:
+        raise RuntimeError("weder Breit- noch Langformat erkannt")
+    kopf = [str(z or "").lower() for z in zeilen[kopf_idx]]
+    wert_sp = None
+    for j, t in enumerate(kopf):
+        if any(b in t for b in ("ziffer", "quote", "anteil")):
+            wert_sp = j
+            break
+    if wert_sp is None:
+        raise RuntimeError("Langformat: keine eindeutige Ziffern-Spalte")
+
+    reihe = []
+    for row in zeilen[kopf_idx + 1:]:
+        rtext = " ".join(str(z) for z in row if z is not None).lower()
+        if region_begriff not in rtext and not re.search(r"\b2937\b", rtext):
+            continue
+        if jahr_sp >= len(row) or wert_sp >= len(row):
+            continue
+        jj = str(row[jahr_sp]).strip()[:4]
+        if not re.match(r"^(19|20)\d{2}$", jj):
+            continue
+        w = row[wert_sp]
+        if isinstance(w, str):
+            w = w.strip().replace("%", "").replace(",", ".")
+            try:
+                w = float(w)
+            except ValueError:
+                continue
+        if isinstance(w, (int, float)) and 0 <= w <= 30:
+            reihe.append((jj, round(float(w), 2)))
+    if len(reihe) < 3:
+        raise RuntimeError(f"Langformat: zu wenige plausible Werte ({len(reihe)})")
+    # pro Jahr nur ein Wert (letzter gewinnt), dann sortieren
+    eindeutig = {}
+    for j, w in reihe:
+        eindeutig[j] = w
+    return (sorted(eindeutig.items()),
+            "https://opendata.swiss/de/dataset/leerwohnungsziffer-nach-gemeinde")
+
+
+def _parse_leerwohnung_zeilen(zeilen, region_begriff):
+    """Generischer Tabellen-Parser (Breitformat: Jahre als Spalten; sonst
+    Delegation ans Langformat). Selbstvalidierend wie gehabt."""
+    def _jahr(z):
+        s = str(z).strip()[:4]
+        return s if re.match(r"^(19|20)\d{2}$", s) else None
+
+    kopf_idx = None
+    jahr_spalten = {}
+    for i, row in enumerate(zeilen[:30]):
+        gefunden = {}
+        for j, zelle in enumerate(row):
+            jj = _jahr(zelle)
+            if jj:
+                gefunden[j] = jj
+        if len(gefunden) >= 5:
+            kopf_idx, jahr_spalten = i, gefunden
+            break
+    if kopf_idx is None:
+        return _leerwohnung_langformat(zeilen, region_begriff)[0]
+
+    ziel = None
+    nummern_treffer = None
+    for row in zeilen[kopf_idx + 1:]:
+        rtext = " ".join(str(z) for z in row[:4] if z is not None).lower()
+        if region_begriff in rtext:
+            ziel = row
+            break
+        if nummern_treffer is None and re.search(r"\b2937\b", rtext):
+            nummern_treffer = row
+    if ziel is None:
+        ziel = nummern_treffer
+    if ziel is None:
+        raise RuntimeError("Gemeindezeile nicht gefunden")
+
+    reihe = []
+    for j, jahr in sorted(jahr_spalten.items()):
+        if j >= len(ziel):
+            continue
+        w = ziel[j]
+        if isinstance(w, str):
+            w = w.strip().replace("%", "").replace(",", ".")
+            try:
+                w = float(w)
+            except ValueError:
+                continue
+        if isinstance(w, (int, float)) and 0 <= w <= 30:
+            reihe.append((jahr, round(float(w), 2)))
+    if len(reihe) < 3:
+        raise RuntimeError(f"zu wenige plausible Werte ({len(reihe)})")
+    reihe.sort()
+    return reihe
+
+
+def _leerwohnung_bfs_asset(region_begriff: str) -> tuple:
+    """Rueckfallebene ueber die BFS-Asset-Schnittstelle: ermittelt aus dem
+    bekannten Asset die stabile Bestellnummer, holt darueber den neuesten
+    Jahrgang der Gemeindetabelle und parst die Excel-Datei. Unterstuetzt
+    sowohl Jahre-als-Spalten als auch ein Blatt pro Jahr (Ziffern-Spalte
+    am Kopf erkannt). Selbstvalidierend."""
+    quelle = f"https://www.bfs.admin.ch/asset/de/{LEERWOHNUNG_ASSET_BEKANNT}"
+    # 1) Metadaten des bekannten Assets -> Bestellnummer -> neuester Jahrgang
+    asset_id = LEERWOHNUNG_ASSET_BEKANNT
+    try:
+        r = requests.get(f"{DAM_API}/{asset_id}", headers=HEADERS, timeout=60)
+        r.raise_for_status()
+        meta = r.json()
+        order_nr = (meta.get("shop") or {}).get("orderNr") or meta.get("orderNr")
+        if order_nr:
+            r2 = requests.get(DAM_API, params={"orderNr": order_nr},
+                              headers=HEADERS, timeout=60)
+            if r2.status_code < 400:
+                daten = r2.json()
+                eintraege = daten.get("data") or daten.get("assets") or []
+                beste = None
+                for a in eintraege:
+                    aid = str(a.get("id") or a.get("assetId") or "")
+                    if aid.isdigit() and (beste is None or int(aid) > int(beste)):
+                        beste = aid
+                if beste:
+                    asset_id = beste
+                    quelle = f"https://www.bfs.admin.ch/asset/de/{asset_id}"
+    except Exception:
+        pass  # Bestellnummern-Weg optional; bekanntes Asset bleibt Rueckhalt
+
+    # 2) Datei laden
+    r = requests.get(f"{DAM_API}/{asset_id}/master", headers=HEADERS, timeout=120)
+    r.raise_for_status()
+
+    import io
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(r.content),
+                                read_only=True, data_only=True)
+
+    # 3a) Erst je Blatt den generischen Parser versuchen (Jahre als Spalten)
+    fehler = []
+    for name in wb.sheetnames:
+        zeilen = [list(row) for row in wb[name].iter_rows(values_only=True)]
+        try:
+            return _parse_leerwohnung_zeilen(zeilen, region_begriff), quelle
+        except Exception as e:
+            fehler.append(f"{name}: {e}")
+
+    # 3b) Ein Blatt pro Jahr: Blattname enthaelt das Jahr, im Kopf eine
+    # Ziffern-Spalte, darunter die Gemeindezeilen.
+    reihe = {}
+    for name in wb.sheetnames:
+        m = re.search(r"(19|20)\d{2}", name)
+        if not m:
+            continue
+        jahr = m.group(0)
+        zeilen = [list(row) for row in wb[name].iter_rows(values_only=True)]
+        kopf_idx = wert_sp = None
+        for i, row in enumerate(zeilen[:15]):
+            for j, zelle in enumerate(row):
+                if "ziffer" in str(zelle or "").lower():
+                    kopf_idx, wert_sp = i, j
+                    break
+            if kopf_idx is not None:
+                break
+        if kopf_idx is None:
+            continue
+        for row in zeilen[kopf_idx + 1:]:
+            rtext = " ".join(str(z) for z in row[:4] if z is not None).lower()
+            if region_begriff in rtext or re.search(r"\b2937\b", rtext):
+                if wert_sp < len(row):
+                    w = row[wert_sp]
+                    if isinstance(w, str):
+                        w = w.strip().replace("%", "").replace(",", ".")
+                        try:
+                            w = float(w)
+                        except ValueError:
+                            break
+                    if isinstance(w, (int, float)) and 0 <= w <= 30:
+                        reihe[jahr] = round(float(w), 2)
+                break
+    if len(reihe) >= 3:
+        return sorted(reihe.items()), quelle
+    raise RuntimeError("keine Struktur erkannt (" + "; ".join(fehler[:3]) + ")")
+
+
+def _leerwohnung_stattab(region_begriff: str) -> tuple:
+    """Direktabruf aus dem BFS-Wuerfel px-x-0902020300_101."""
+    cube = "px-x-0902020300_101"
+    seite = f"{STATTAB_SEITE}/{cube}/{cube}.px"
+    # Metadaten laden, mehrere URL-Formen probieren
+    meta = None
+    basis_ok = None
+    # Dieser Wuerfel liegt in einem Unterordner gleichen Namens; seine API-
+    # Adresse ist deshalb DREISTUFIG (Cube-Name dreimal). Die kuerzeren
+    # Formen liefern HTTP 400, was uns lange in die Irre fuehrte.
+    versuche = []
+    for stufen, basis in (("dreistufig", f"{STATTAB_BASIS}/{cube}/{cube}/{cube}.px"),
+                          ("zweistufig", f"{STATTAB_BASIS}/{cube}/{cube}.px"),
+                          ("einstufig", f"{STATTAB_BASIS}/{cube}.px")):
+        try:
+            r = requests.get(basis, headers=HEADERS, timeout=60)
+            versuche.append(f"{stufen}: HTTP {r.status_code}")
+            if r.status_code < 400:
+                meta = r.json()
+                basis_ok = basis
+                break
+        except Exception as e:
+            versuche.append(f"{stufen}: {e}")
+    if not meta:
+        raise RuntimeError("Wuerfel nicht erreichbar (" + ", ".join(versuche) + ")")
+
+    # Dimensionen bestimmen
+    reg_var = zeit_var = None
+    dim_fest = {}   # code -> gewaehlter Wert
+    for var in meta["variables"]:
+        code = var["code"]
+        texte = var.get("valueTexts", [])
+        werte = var.get("values", [])
+        cl = code.lower()
+        if "gemeinde" in cl or "region" in cl or "kanton" in cl:
+            reg_var = var
+        elif var.get("time"):
+            zeit_var = var
+        elif "wohnräume" in cl or "wohnraeume" in cl:
+            # Total waehlen
+            dim_fest[code] = _waehle_total(werte, texte)
+        elif "leerwohnung" in cl and "typ" in cl:
+            dim_fest[code] = _waehle_total(werte, texte)
+        elif "anzahl" in cl and "anteil" in cl:
+            # die Ziffer (Prozent) waehlen, nicht die absolute Anzahl
+            dim_fest[code] = _waehle_begriff(
+                werte, texte, ["leerwohnungsziffer", "ziffer", "anteil"])
+        else:
+            dim_fest[code] = _waehle_total(werte, texte)
+
+    # Region Neuhausen finden
+    reg_code = None
+    for w, t in zip(reg_var["values"], reg_var["valueTexts"]):
+        if region_begriff in t.lower():
+            reg_code = w
+            break
+    if reg_code is None:
+        raise RuntimeError("Region nicht gefunden")
+
+    # Alle Jahre abfragen
+    q = [{"code": reg_var["code"], "selection": {"filter": "item", "values": [reg_code]}}]
+    for code, wert in dim_fest.items():
+        q.append({"code": code, "selection": {"filter": "item", "values": [wert]}})
+    q.append({"code": zeit_var["code"],
+              "selection": {"filter": "item", "values": zeit_var["values"]}})
+
+    r = requests.post(basis_ok, json={"query": q,
+                      "response": {"format": "json-stat2"}},
+                      headers=HEADERS, timeout=90)
+    r.raise_for_status()
+    js = r.json()
+    werte = js.get("value", [])
+    # Jahr-Dimension: Position -> Jahr-Label
+    zeit_dim = js["dimension"][zeit_var["code"]]["category"]
+    idx = zeit_dim["index"]          # code -> position
+    labels = zeit_dim.get("label", {})
+    pos_zu_jahr = {}
+    for code, pos in idx.items():
+        jahr = str(labels.get(code, code))[:4]
+        if re.match(r"^\d{4}$", jahr):
+            pos_zu_jahr[pos] = jahr
+
+    reihe = []
+    for pos in range(len(werte)):
+        w = werte[pos]
+        # Nur echte Zahlen (Platzhalter '...' kommt als None oder String)
+        if isinstance(w, (int, float)) and pos in pos_zu_jahr:
+            reihe.append((pos_zu_jahr[pos], round(float(w), 2)))
+    reihe.sort()
+    return reihe, seite
+
+
+def _waehle_total(werte, texte):
+    """Waehlt den Total-Wert einer Dimension (per Label 'total' oder 'alle')."""
+    for w, t in zip(werte, texte):
+        tl = t.lower()
+        if "total" in tl or "- alle" in tl or "alle" == tl.strip():
+            return w
+    return werte[0] if werte else None
+
+
+def _waehle_begriff(werte, texte, begriffe):
+    """Waehlt den Wert, dessen Label einen der Begriffe enthaelt."""
+    for w, t in zip(werte, texte):
+        tl = t.lower()
+        for b in begriffe:
+            if b in tl:
+                return w
+    return werte[0] if werte else None
+
+
+# Offizieller Maschinenbezug der BFS-Dateien (Asset-Schnittstelle).
+# Das bekannte Asset ist die Gemeindetabelle der Leerwohnungszaehlung
+# (Ausgabe 2025). Ueber seine Metadaten wird die stabile Bestellnummer
+# ermittelt, mit der kuenftige Jahrgaenge automatisch gefunden werden.
+DAM_API = "https://dam-api.bfs.admin.ch/hub/api/dam/assets"
+LEERWOHNUNG_ASSET_BEKANNT = "36093199"
 
 
 def _leerwohnung_langformat(zeilen, region_begriff):
@@ -2171,45 +2489,34 @@ def diagnose_leerwohnung():
     except Exception as e:
         print(f"  fehlgeschlagen: {e}")
 
-    print("\n--- Stufe 2: opendata.swiss ---")
+    print("\n--- Stufe 2: BFS-Asset-Schnittstelle ---")
     try:
-        r = requests.get(LEERWOHNUNG_CKAN, headers=HEADERS, timeout=60)
-        print(f"  Katalog-Status: {r.status_code}")
-        paket = r.json()
-        ressourcen = paket.get("result", {}).get("resources", [])
-        for res in ressourcen:
-            print(f"    Ressource: format={res.get('format')!r} "
-                  f"url={(res.get('download_url') or res.get('url') or '')[:90]}")
-        # Erste ladbare Datei holen und ihren Kopf offenlegen
-        for res in ressourcen:
-            fmt = (res.get("format") or "").lower()
-            url = res.get("download_url") or res.get("url") or ""
-            if not url or fmt not in ("xlsx", "xls", "csv"):
-                continue
-            print(f"\n  --- Dateikopf ({fmt}) ---")
-            d = requests.get(url, headers=HEADERS, timeout=120)
-            print(f"  Datei-Status: {d.status_code}, {len(d.content):,} Bytes")
-            if fmt in ("xlsx", "xls"):
-                import io
-                import openpyxl
-                wb = openpyxl.load_workbook(io.BytesIO(d.content),
-                                            read_only=True, data_only=True)
-                print(f"  Blaetter: {wb.sheetnames}")
-                for name in wb.sheetnames[:3]:
-                    print(f"  --- Blatt {name!r}, erste 12 Zeilen ---")
-                    for i, row in enumerate(wb[name].iter_rows(values_only=True)):
-                        if i >= 12:
-                            break
-                        print(f"    {i}: {list(row)[:8]}")
-            else:
-                text = d.content.decode("utf-8-sig", "replace")
-                for i, zeile in enumerate(text.splitlines()[:12]):
-                    print(f"    {i}: {zeile[:160]}")
-            break
+        r = requests.get(f"{DAM_API}/{LEERWOHNUNG_ASSET_BEKANNT}",
+                         headers=HEADERS, timeout=60)
+        print(f"  Asset-Metadaten: HTTP {r.status_code}")
+        if r.status_code < 400:
+            meta = r.json()
+            order_nr = (meta.get("shop") or {}).get("orderNr") or meta.get("orderNr")
+            print(f"  Bestellnummer: {order_nr!r}")
+        d = requests.get(f"{DAM_API}/{LEERWOHNUNG_ASSET_BEKANNT}/master",
+                         headers=HEADERS, timeout=120)
+        print(f"  Datei: HTTP {d.status_code}, {len(d.content):,} Bytes")
+        if d.status_code < 400:
+            import io
+            import openpyxl
+            wb = openpyxl.load_workbook(io.BytesIO(d.content),
+                                        read_only=True, data_only=True)
+            print(f"  Blaetter: {wb.sheetnames}")
+            for name in wb.sheetnames[:2]:
+                print(f"  --- Blatt {name!r}, erste 10 Zeilen ---")
+                for i, row in enumerate(wb[name].iter_rows(values_only=True)):
+                    if i >= 10:
+                        break
+                    print(f"    {i}: {list(row)[:8]}")
     except Exception as e:
-        print(f"  Katalog-FEHLER: {e}")
+        print(f"  Metadaten/Datei-FEHLER: {e}")
     try:
-        reihe, url = _leerwohnung_opendata("neuhausen am rheinfall")
+        reihe, url = _leerwohnung_bfs_asset("neuhausen am rheinfall")
         print(f"  ERFOLG: {len(reihe)} Werte, "
               f"{reihe[0][0]}-{reihe[-1][0]}, aktuell {reihe[-1][1]}%")
         print(f"  Reihe: {reihe}")
