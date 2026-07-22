@@ -22,5 +22,5 @@ jobs:
       - name: Abhaengigkeiten installieren
         run: pip install pdfplumber
 
-      - name: Jahresrechnungen strukturieren und pruefen
-        run: python finanz_extraktor.py --diagnose
+      - name: Alle Jahrgaenge 2020-2025 pruefen
+        run: python finanz_extraktor.py --uebersicht
