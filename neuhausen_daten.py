@@ -51,7 +51,7 @@ PRESSE_LEAD_MAX_PRO_LAUF = 40    # so viele fehlende Leads werden pro Lauf gehol
 PRESSE_RUECKFUELL_AB_JAHR = 2020
 KENNZAHLEN_AUSGABE = BASIS / "kennzahlen.js"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 9          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 10          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -1376,6 +1376,45 @@ def baue_kennzahlen() -> None:
               f"{reihe[-1][0]} ({len(reihe)} Werte, aktuell {reihe[-1][1]})")
     except Exception as e:
         fehler.append(f"Neu erstellte Wohnungen: {e}")
+
+    # --- Neubau nach Zimmerzahl (Verteilung, welche Wohnungsgroessen entstehen) ---
+    # Wuerfel _105: neu erstellte Wohnungen nach Zimmerzahl, bis 2024.
+    # Zeigt als Verteilung, welche Groessen zuletzt gebaut wurden, plus
+    # die Summe der letzten Jahre fuer eine stabilere Aussage.
+    try:
+        ZIMMER = [
+            ("1-Zimmer", ["1-zimmer-wohnung"]),
+            ("2-Zimmer", ["2-zimmer-wohnung"]),
+            ("3-Zimmer", ["3-zimmer-wohnung"]),
+            ("4-Zimmer", ["4-zimmer-wohnung"]),
+            ("5-Zimmer", ["5-zimmer-wohnung"]),
+            ("6+ Zimmer", ["6-zimmer-wohnung oder grösser"]),
+        ]
+        verteilung = []
+        url_neubau = ""
+        for label, begriffe in ZIMMER:
+            reihe, url_neubau = _stattab_reihe(
+                "px-x-0904030000_105", [],
+                fest={"Anzahl Zimmer": begriffe})
+            # Summe der letzten 5 Jahre (stabiler als ein Einzeljahr)
+            letzte = reihe[-5:] if len(reihe) >= 5 else reihe
+            summe = sum(w for _, w in letzte)
+            verteilung.append((label, summe))
+        gesamt = sum(w for _, w in verteilung)
+        if gesamt > 0:
+            # Als "Reihe" fuer die Karte: Label -> Anteil in Prozent
+            anteile = [(label, round(w / gesamt * 100, 1))
+                       for label, w in verteilung]
+            karte("Wohnen", "Neubau nach Wohnungsgrösse", "%",
+                  anteile, "BFS, STAT-TAB", url_neubau,
+                  hinweis="Anteil der neu erstellten Wohnungen nach Zimmerzahl, "
+                          "Summe der letzten 5 Jahre",
+                  extra={"typ": "verteilung"})
+            spitze = max(anteile, key=lambda x: x[1])
+            print(f"  Kennzahlen: Neubau nach Zimmerzahl "
+                  f"(haeufigste {spitze[0]} mit {spitze[1]}%)")
+    except Exception as e:
+        fehler.append(f"Neubau nach Zimmerzahl: {e}")
 
     # --- Vergleich mit Kanton und Schweiz (Wachstum in Prozent) ---
     for name, cube, festl, festd, ab_jahr in (

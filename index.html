@@ -1611,6 +1611,49 @@
           raster.appendChild(karte);
           return;
         }
+        if (k.typ === "verteilung") {
+          karte.className = "kz-karte kz-nichtklickbar";
+          var vt = document.createElement("div");
+          vt.className = "kz-vgl";
+          var maxV = 1;
+          (k.reihe || []).forEach(function (w) {
+            maxV = Math.max(maxV, w[1]);
+          });
+          (k.reihe || []).forEach(function (w) {
+            var z = document.createElement("div");
+            z.className = "kz-vgl-zeile";
+            var lab = document.createElement("div");
+            lab.className = "lab"; lab.textContent = w[0];
+            z.appendChild(lab);
+            var bal = document.createElement("div");
+            bal.className = "balken";
+            var fuell = document.createElement("div");
+            fuell.style.width = Math.max(2, w[1] / maxV * 100) + "%";
+            fuell.style.background = "#E2001A";
+            bal.appendChild(fuell);
+            z.appendChild(bal);
+            var wt = document.createElement("div");
+            wt.className = "wert";
+            wt.textContent = kzZahl(w[1]) + " %";
+            z.appendChild(wt);
+            vt.appendChild(z);
+          });
+          karte.appendChild(vt);
+          var vtq = document.createElement("div");
+          vtq.className = "kz-quelle";
+          var vtqa = document.createElement("a");
+          vtqa.href = k.quelleUrl || "#"; vtqa.target = "_blank"; vtqa.rel = "noopener";
+          vtqa.textContent = k.quelle || "Quelle";
+          vtq.appendChild(document.createTextNode("Quelle: "));
+          vtq.appendChild(vtqa);
+          if (k.hinweis) {
+            vtq.appendChild(document.createElement("br"));
+            vtq.appendChild(document.createTextNode(k.hinweis));
+          }
+          karte.appendChild(vtq);
+          raster.appendChild(karte);
+          return;
+        }
         var reihe = k.reihe || [];
         var letzte = reihe[reihe.length - 1];
         var wert = document.createElement("div");
