@@ -1538,7 +1538,78 @@ def diagnose_stattab():
                         print(f"       {w!r} = {t!r}")
         except Exception as e:
             print(f"  FEHLER: {e}")
-    print("\n===== Ende Diagnose =====")
+    print("\n===== Ende Struktur-Diagnose =====")
+
+    # --- Sonde 1: echte Bevoelkerungsabfrage (warum 11834 statt 11848?) ---
+    print("\n===== SONDE Bevoelkerung 2024 =====")
+    try:
+        basis = f"{STATTAB_BASIS}/px-x-0102020000_201/px-x-0102020000_201.px"
+        meta = requests.get(basis, headers=HEADERS, timeout=60).json()
+        # Neuhausen-Code finden
+        reg_code = None
+        for var in meta["variables"]:
+            if "gemeinde" in var["code"].lower():
+                for w, t in zip(var["values"], var["valueTexts"]):
+                    if "neuhausen am rheinfall" in t.lower():
+                        reg_code = (var["code"], w)
+            if var["code"] == "Staatsangehörigkeit (Kategorie)":
+                sak_var = var
+            if var["code"] == "Geschlecht":
+                ge_var = var
+            if var["code"] == "Demografische Komponente":
+                dk_var = var
+        # Total/Ausland/Schweiz-Codes und Bestand-31.12-Code ausgeben
+        def zeig(var, label):
+            print(f"  {label}:")
+            for w, t in zip(var["values"], var["valueTexts"]):
+                print(f"       code {w!r} = {t!r}")
+        zeig(sak_var, "Staatsangehörigkeit (Kategorie)")
+        print(f"  Neuhausen-Region: {reg_code}")
+        # Abfrage bauen: Total, Geschlecht-Total, Bestand 31.12, Jahr 2024
+        def code_fuer(var, begriff):
+            for w, t in zip(var["values"], var["valueTexts"]):
+                if begriff in t.lower():
+                    return w
+            return None
+        q = [
+            {"code": reg_code[0], "selection": {"filter": "item", "values": [reg_code[1]]}},
+            {"code": "Staatsangehörigkeit (Kategorie)", "selection": {"filter": "item",
+             "values": [code_fuer(sak_var, "total")]}},
+            {"code": "Geschlecht", "selection": {"filter": "item",
+             "values": [code_fuer(ge_var, "total")]}},
+            {"code": "Demografische Komponente", "selection": {"filter": "item",
+             "values": [code_fuer(dk_var, "bestand am 31. dezember")]}},
+        ]
+        # Jahr 2024
+        for var in meta["variables"]:
+            if var.get("time"):
+                q.append({"code": var["code"], "selection": {"filter": "item",
+                          "values": [var["values"][-1]]}})
+                print(f"  Jahr (letztes): {var['values'][-1]} = {var['valueTexts'][-1]}")
+        ant = requests.post(basis, json={"query": q,
+              "response": {"format": "json-stat2"}}, headers=HEADERS, timeout=60)
+        print(f"  Antwort-Status: {ant.status_code}")
+        js = ant.json()
+        print(f"  value-Array: {js.get('value')}")
+        print(f"  -> erwartet 11848 laut Gemeinde-PDF")
+    except Exception as e:
+        print(f"  SONDE-FEHLER: {e}")
+
+    # --- Sonde 2: Leerwohnungs-Wuerfel ueber mehrere URL-Formen ---
+    print("\n===== SONDE Leerwohnungen URL-Formen =====")
+    for form in (f"{STATTAB_BASIS}/px-x-0902020300_101/px-x-0902020300_101.px",
+                 f"{STATTAB_BASIS}/px-x-0902020300_101.px",
+                 f"{STATTAB_BASIS}/px-x-0902020300_103/px-x-0902020300_103.px"):
+        try:
+            r = requests.get(form, headers=HEADERS, timeout=40)
+            print(f"  {form}\n     -> Status {r.status_code}")
+            if r.status_code < 400:
+                m = r.json()
+                for var in m.get("variables", [])[:6]:
+                    print(f"       [{var['code']}] {len(var.get('valueTexts', []))} Werte")
+        except Exception as e:
+            print(f"  {form}\n     -> FEHLER {e}")
+    print("\n===== Ende Sonden =====")
 
 
 def main():
