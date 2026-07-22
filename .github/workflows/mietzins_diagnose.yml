@@ -1,0 +1,23 @@
+name: Mietzins-Diagnose
+
+# Nur manuell startbar. Prueft, ob der amtliche BFS-Netto-Mietzins pro m2
+# (City Statistics) fuer Neuhausen verwertbare Werte liefert oder ob zu
+# viele Jahre datenschutzbedingt unterdrueckt sind. Aendert keine Dateien.
+on:
+  workflow_dispatch:
+
+jobs:
+  mietzins:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Repository holen
+        uses: actions/checkout@v5
+      - name: Python einrichten
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Abhaengigkeiten installieren
+        run: pip install requests beautifulsoup4 pypdf openpyxl
+      - name: Mietzins-Verfuegbarkeit testen
+        run: python neuhausen_daten.py --diagnose-mietzins
