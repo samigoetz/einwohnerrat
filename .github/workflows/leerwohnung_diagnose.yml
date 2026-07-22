@@ -1,0 +1,23 @@
+name: Leerwohnungs-Diagnose
+
+# Nur manuell startbar. Testet beide Stufen der Leerwohnungsziffer-Kaskade
+# und legt Blattnamen sowie die ersten Zeilen der echten Datei offen.
+# Aendert keine Dateien.
+on:
+  workflow_dispatch:
+
+jobs:
+  leerwohnung:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Repository holen
+        uses: actions/checkout@v5
+      - name: Python einrichten
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Abhaengigkeiten installieren
+        run: pip install requests beautifulsoup4 pypdf openpyxl
+      - name: Leerwohnungs-Kaskade testen
+        run: python neuhausen_daten.py --diagnose-leerwohnung
