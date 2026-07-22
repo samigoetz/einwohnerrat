@@ -146,7 +146,10 @@ def extrahiere_uebersicht(zeilen):
 
 
 def extrahiere_a8_kennzahlen(zeilen):
-    """Seite A8 Finanzkennzahlen: je Kennzahl (rechnung, vorjahr) in %."""
+    """Seite A8 Finanzkennzahlen: je Kennzahl (rechnung, vorjahr) in %.
+    Nutzt zuerst Prozent-Muster im Text; wenn das keine zwei Werte findet,
+    greift es auf die koordinatenbasierten Zahlen der Zeile zurueck (manche
+    Kennzahlen stehen mit raeumlich getrennten Prozentzeichen)."""
     kennzahlen = {}
     muster = {
         "nettoverschuldungsquotient": r"Nettoverschuldungsquotient",
@@ -160,11 +163,21 @@ def extrahiere_a8_kennzahlen(zeilen):
     for text, zahlen in zeilen:
         z = text.strip()
         for schluessel, m in muster.items():
+            if schluessel in kennzahlen:
+                continue
             if re.match(m, z):
                 proz = re.findall(r"(-?\d+(?:\.\d+)?)\s*%", z)
                 if len(proz) >= 2:
                     kennzahlen[schluessel] = [float(proz[0]), float(proz[1])]
-        if re.match(r"Nettoschuld I pro Einwohner", z):
+                elif len(zahlen) >= 2:
+                    # Fallback: erste zwei Zahlen der Zeile (Rechnung, Vorjahr).
+                    # Nur Werte im plausiblen Prozentbereich (-1000..1000).
+                    kandidaten = [x for x in zahlen if -1000 <= x <= 1000]
+                    if len(kandidaten) >= 2:
+                        kennzahlen[schluessel] = [float(kandidaten[0]),
+                                                  float(kandidaten[1])]
+        if "nettoschuld_pro_kopf" not in kennzahlen \
+                and re.match(r"Nettoschuld I pro Einwohner", z):
             if len(zahlen) >= 2:
                 kennzahlen["nettoschuld_pro_kopf"] = zahlen[:2]
     return kennzahlen
@@ -199,16 +212,17 @@ def _erster_betrag(zahlen):
 def pruefe(uebersicht, bilanz):
     """Kontrollsummen. Gibt Liste (name, ok, detail) zurueck."""
     proben = []
-    # Probe 1: Gesamtaufwand + Gesamtertrag = Ergebnis (Vorzeichen beachten)
+    # Probe 1: |Ertrag| - |Aufwand| = Ergebnis. Die Uebersichtszeilen mischen
+    # Vorzeichen aus mehreren Spalten, deshalb mit Betraegen rechnen.
     if "gesamtaufwand" in uebersicht and "gesamtertrag" in uebersicht \
             and "ergebnis_er" in uebersicht:
-        auf = uebersicht["gesamtaufwand"][0]
-        ert = uebersicht["gesamtertrag"][0]
+        auf = abs(uebersicht["gesamtaufwand"][0])
+        ert = abs(uebersicht["gesamtertrag"][0])
         erg = uebersicht["ergebnis_er"][0]
-        summe = auf + ert
-        ok = abs(summe - erg) <= 2  # Rundungstoleranz
-        proben.append(("Aufwand+Ertrag=Ergebnis (Erfolgsrechnung)", ok,
-                       f"{auf} + {ert} = {summe}, ausgewiesen {erg}"))
+        differenz = ert - auf
+        ok = abs(differenz - erg) <= 2  # Rundungstoleranz
+        proben.append(("Ertrag - Aufwand = Ergebnis (Erfolgsrechnung)", ok,
+                       f"{ert} - {auf} = {differenz}, ausgewiesen {erg}"))
     # Probe 2: Aktiven + Passiven = 0 (Passiven negativ gefuehrt)
     if "aktiven" in bilanz and "passiven" in bilanz:
         a = bilanz["aktiven"]
@@ -308,6 +322,14 @@ def diagnose():
             print("      keine Proben moeglich (Werte fehlen)")
         for name, ok, detail in proben:
             print(f"      [{'OK ' if ok else 'FEHLER'}] {name}: {detail}")
+        # Rohzeilen der A8-Seite zeigen, falls Kennzahlen fehlen
+        if len(a8) < 8:
+            print(f"\n  --- A8-ROHZEILEN (zur Diagnose fehlender Kennzahlen) ---")
+            for text, zahlen in zeilen:
+                if re.search(r"Nettoverschuldung|Investitionsanteil|"
+                             r"Zinsbelastung|Nettoschuld", text):
+                    print(f"      TEXT: {text!r}")
+                    print(f"      ZAHLEN: {zahlen}")
         print(f"\n  Ergebnis {jahr}: {len(a8)}/8 A8-Kennzahlen, "
               f"{sum(1 for _, ok, _ in proben if ok)}/{len(proben)} Proben ok")
     print(f"\n{'=' * 60}\nEnde Finanz-Diagnose\n{'=' * 60}")
