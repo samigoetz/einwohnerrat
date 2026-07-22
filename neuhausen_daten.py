@@ -51,7 +51,7 @@ PRESSE_LEAD_MAX_PRO_LAUF = 40    # so viele fehlende Leads werden pro Lauf gehol
 PRESSE_RUECKFUELL_AB_JAHR = 2020
 KENNZAHLEN_AUSGABE = BASIS / "kennzahlen.js"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 11          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 12          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -1267,10 +1267,21 @@ def _wachstum(reihe: list, ab_jahr: int):
 
 
 def _leerwohnungsziffer(region_begriff: str = "neuhausen am rheinfall") -> tuple:
-    """Holt die Leerwohnungsziffer-Zeitreihe fuer eine Gemeinde direkt aus dem
-    BFS-Wuerfel px-x-0902020300_101. Robust gegen: mehrere URL-Formen,
-    Platzhalter '...' (Daten nicht verfuegbar), verschachtelte Jahrescodes.
-    Gibt ([(jahr, ziffer), ...], quellen_url) zurueck."""
+    """Holt die Leerwohnungsziffer-Zeitreihe fuer eine Gemeinde. Kaskade:
+    1) BFS STAT-TAB-Wuerfel (historisch oft HTTP 400, aber falls repariert
+       der direkteste Weg), 2) offene Daten via opendata.swiss-Katalog
+    (Leerwohnungszaehlung als Datei). Gibt ([(jahr, ziffer), ...], url)."""
+    try:
+        return _leerwohnung_stattab(region_begriff)
+    except Exception as e1:
+        try:
+            return _leerwohnung_opendata(region_begriff)
+        except Exception as e2:
+            raise RuntimeError(f"STAT-TAB: {e1} / opendata.swiss: {e2}")
+
+
+def _leerwohnung_stattab(region_begriff: str) -> tuple:
+    """Direktabruf aus dem BFS-Wuerfel px-x-0902020300_101."""
     cube = "px-x-0902020300_101"
     seite = f"{STATTAB_SEITE}/{cube}/{cube}.px"
     # Metadaten laden, mehrere URL-Formen probieren
@@ -1372,6 +1383,119 @@ def _waehle_begriff(werte, texte, begriffe):
             if b in tl:
                 return w
     return werte[0] if werte else None
+
+
+LEERWOHNUNG_CKAN = ("https://opendata.swiss/api/3/action/package_show"
+                    "?id=leerwohnungsziffer-nach-gemeinde")
+
+
+def _leerwohnung_opendata(region_begriff: str) -> tuple:
+    """Rueckfallebene: laedt die Leerwohnungsziffer aus den offenen Daten
+    der Leerwohnungszaehlung (opendata.swiss-Katalog -> BFS-Datei).
+    Parst die Tabelle generisch: sucht die Kopfzeile mit Jahreszahlen und
+    die Gemeindezeile. Selbstvalidierend: ohne eindeutigen Fund oder bei
+    unplausiblen Werten (Ziffer ausserhalb 0-30 %) wird abgebrochen,
+    damit nie falsche Zahlen entstehen."""
+    # 1) Katalogeintrag holen -> aktuelle Datei-URL
+    r = requests.get(LEERWOHNUNG_CKAN, headers=HEADERS, timeout=60)
+    r.raise_for_status()
+    paket = r.json()
+    if not paket.get("success"):
+        raise RuntimeError("Katalogantwort ohne success")
+    ressourcen = paket["result"].get("resources", [])
+    # Bevorzugt Excel/CSV; erste brauchbare Ressource nehmen
+    datei_url = None
+    datei_format = ""
+    for res in ressourcen:
+        fmt = (res.get("format") or "").lower()
+        url = res.get("download_url") or res.get("url") or ""
+        if url and fmt in ("xlsx", "xls", "csv"):
+            datei_url, datei_format = url, fmt
+            break
+    if not datei_url:
+        raise RuntimeError("keine ladbare Ressource im Katalog")
+
+    r = requests.get(datei_url, headers=HEADERS, timeout=120)
+    r.raise_for_status()
+
+    # 2) Tabellenzeilen gewinnen (Excel via openpyxl, CSV direkt)
+    zeilen = []
+    if datei_format in ("xlsx", "xls"):
+        import io
+        import openpyxl
+        wb = openpyxl.load_workbook(io.BytesIO(r.content),
+                                    read_only=True, data_only=True)
+        # Blatt mit "ziffer" im Namen bevorzugen, sonst erstes
+        blatt = None
+        for name in wb.sheetnames:
+            if "ziffer" in name.lower():
+                blatt = wb[name]
+                break
+        blatt = blatt or wb[wb.sheetnames[0]]
+        for row in blatt.iter_rows(values_only=True):
+            zeilen.append(list(row))
+    else:
+        import csv
+        import io
+        text = r.content.decode("utf-8-sig", "replace")
+        trenner = ";" if text.count(";") > text.count(",") else ","
+        for row in csv.reader(io.StringIO(text), delimiter=trenner):
+            zeilen.append(row)
+
+    # 3) Kopfzeile mit Jahreszahlen finden
+    def _jahr(z):
+        s = str(z).strip()[:4]
+        return s if re.match(r"^(19|20)\d{2}$", s) else None
+
+    kopf_idx = None
+    jahr_spalten = {}   # spaltenindex -> jahr
+    for i, row in enumerate(zeilen[:30]):
+        gefunden = {}
+        for j, zelle in enumerate(row):
+            jj = _jahr(zelle)
+            if jj:
+                gefunden[j] = jj
+        if len(gefunden) >= 5:     # eine echte Jahres-Kopfzeile
+            kopf_idx, jahr_spalten = i, gefunden
+            break
+    if kopf_idx is None:
+        raise RuntimeError("keine Jahres-Kopfzeile gefunden")
+
+    # 4) Gemeindezeile finden: Namens-Treffer hat Vorrang; die BFS-Nummer
+    # dient nur als Rueckfallebene (eine Zahl 2937 koennte theoretisch
+    # auch als Messwert einer anderen Zeile auftauchen).
+    ziel = None
+    nummern_treffer = None
+    for row in zeilen[kopf_idx + 1:]:
+        rtext = " ".join(str(z) for z in row[:4] if z is not None).lower()
+        if region_begriff in rtext:
+            ziel = row
+            break
+        if nummern_treffer is None and re.search(r"\b2937\b", rtext):
+            nummern_treffer = row
+    if ziel is None:
+        ziel = nummern_treffer
+    if ziel is None:
+        raise RuntimeError("Gemeindezeile nicht gefunden")
+
+    # 5) Werte zuordnen und plausibilisieren
+    reihe = []
+    for j, jahr in sorted(jahr_spalten.items()):
+        if j >= len(ziel):
+            continue
+        w = ziel[j]
+        if isinstance(w, str):
+            w = w.strip().replace("%", "").replace(",", ".")
+            try:
+                w = float(w)
+            except ValueError:
+                continue
+        if isinstance(w, (int, float)) and 0 <= w <= 30:
+            reihe.append((jahr, round(float(w), 2)))
+    if len(reihe) < 3:
+        raise RuntimeError(f"zu wenige plausible Werte ({len(reihe)})")
+    reihe.sort()
+    return reihe, "https://opendata.swiss/de/dataset/leerwohnungsziffer-nach-gemeinde"
 
 
 def baue_kennzahlen() -> None:
@@ -1969,7 +2093,44 @@ def diagnose_wohnen_umwelt():
           "Vergleich Neuhausen/Kanton/Schweiz moeglich ist.")
 
 
+def diagnose_leerwohnung():
+    """Testet die Leerwohnungsziffer-Kaskade am echten System und legt bei
+    Problemen die Katalogstruktur offen.
+    Aufruf: python neuhausen_daten.py --diagnose-leerwohnung"""
+    print("===== Leerwohnungsziffer-Diagnose =====")
+    print("\n--- Stufe 1: STAT-TAB-Wuerfel ---")
+    try:
+        reihe, url = _leerwohnung_stattab("neuhausen am rheinfall")
+        print(f"  ERFOLG: {len(reihe)} Werte, "
+              f"{reihe[0][0]}-{reihe[-1][0]}, aktuell {reihe[-1][1]}%")
+    except Exception as e:
+        print(f"  fehlgeschlagen: {e}")
+
+    print("\n--- Stufe 2: opendata.swiss ---")
+    try:
+        r = requests.get(LEERWOHNUNG_CKAN, headers=HEADERS, timeout=60)
+        print(f"  Katalog-Status: {r.status_code}")
+        paket = r.json()
+        for res in paket.get("result", {}).get("resources", []):
+            print(f"    Ressource: format={res.get('format')!r} "
+                  f"url={(res.get('download_url') or res.get('url') or '')[:90]}")
+    except Exception as e:
+        print(f"  Katalog-FEHLER: {e}")
+    try:
+        reihe, url = _leerwohnung_opendata("neuhausen am rheinfall")
+        print(f"  ERFOLG: {len(reihe)} Werte, "
+              f"{reihe[0][0]}-{reihe[-1][0]}, aktuell {reihe[-1][1]}%")
+        print(f"  Reihe: {reihe}")
+    except Exception as e:
+        print(f"  Abruf/Parsen fehlgeschlagen: {e}")
+    print("\n===== Ende Leerwohnungs-Diagnose =====")
+
+
 def main():
+    if "--diagnose-leerwohnung" in sys.argv:
+        diagnose_leerwohnung()
+        return
+
     if "--diagnose-stattab" in sys.argv:
         diagnose_stattab()
         return

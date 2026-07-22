@@ -500,9 +500,7 @@ def zonen_fuer(schluessel):
         # skala_hoch: (grenze, label), Wert >= grenze -> label.
         # Absteigende Grenzen (z. B. 100 ideal, 80 gut, 50 problematisch, None)
         eintraege = meta["skala_hoch"]
-        untergrenze = None  # laufende Untergrenze der aktuellen Zone
-        # Reihenfolge: von hoechster Grenze abwaerts. Baender von unten bauen.
-        # Wir kehren um, damit "von/bis" sauber aufsteigend werden.
+        # Grenzen absteigend; "vorherige" ist jeweils die obere Zonengrenze.
         vorherige = None
         for grenze, label in eintraege:
             # Zone: [grenze, vorherige)  (vorherige = obere Grenze oder None)
@@ -661,8 +659,8 @@ def baue_finanz_zeitreihen(lade_funktion=None):
                               "wird. Ein tieferer Steuerfuss bedeutet tiefere "
                               "Steuern.",
                 "was_bedeutet": "In Prozent der einfachen Staatssteuer. "
-                                "Neuhausen senkte den Steuerfuss natürlicher "
-                                "Personen zuletzt.",
+                                "Vergleichbar nur innerhalb des Kantons, da "
+                                "jeder Kanton eigene Steuertarife kennt.",
                 "reihe": reihe,
             }
 

@@ -1259,6 +1259,12 @@
     if (typeof w !== "number") return String(w);
     return w.toLocaleString("de-CH").replace(/,/g, "\u2019");
   }
+  function kzEinheit(einheit) {
+    // Anzeigetext einer Einheit: "%" direkt angehaengt, alles andere
+    // (CHF, Wohnungen, ...) mit Abstand. Leer -> nichts.
+    if (!einheit) return "";
+    return einheit === "%" ? "%" : "\u00a0" + einheit;
+  }
   function kzSparkline(reihe) {
     var ns = "http://www.w3.org/2000/svg";
     var svg = document.createElementNS(ns, "svg");
@@ -1318,7 +1324,7 @@
       gruen: "#1D7A3E", orange: "#C8860D", rot: "#E2001A", neutral: "#9A9A98"
     };
     if (zonen && zonen.length) {
-      zonen.forEach(function (z) {
+      zonen.forEach(function (z, zi) {
         // Zonengrenzen auf den sichtbaren Bereich beschneiden
         var oberW = (z.bis === null || z.bis === undefined) ? max : z.bis;
         var unterW = (z.von === null || z.von === undefined) ? min : z.von;
@@ -1331,7 +1337,13 @@
         rect.setAttribute("width", iB);
         rect.setAttribute("height", (yUnten - yOben).toFixed(1));
         rect.setAttribute("fill", zonenFarben[z.farbe] || zonenFarben.neutral);
-        rect.setAttribute("fill-opacity", "0.09");
+        // Deckkraft: kraeftig genug zum Erkennen, transparent genug fuer die
+        // Linie. Gleichfarbige Nachbarzonen (z. B. alle neutral beim
+        // Investitionsanteil) alternieren, damit die Baender sichtbar bleiben.
+        var deck = z.farbe === "neutral"
+          ? (zi % 2 === 0 ? "0.08" : "0.16")
+          : (zi % 2 === 0 ? "0.13" : "0.17");
+        rect.setAttribute("fill-opacity", deck);
         var t = document.createElementNS(ns, "title");
         t.textContent = z.label;
         rect.appendChild(t);
@@ -1385,7 +1397,7 @@
       c.setAttribute("r", reihe.length > 25 ? "2.2" : "3.2");
       c.setAttribute("fill", "#E2001A");
       var t = document.createElementNS(ns, "title");
-      t.textContent = p[0] + ": " + kzZahl(p[1]) + (einheit === "%" ? "%" : "");
+      t.textContent = p[0] + ": " + kzZahl(p[1]) + kzEinheit(einheit);
       c.appendChild(t);
       svg.appendChild(c);
     });
@@ -1481,7 +1493,7 @@
         var d = wert - reihe[i - 1][1];
         diffTxt = (d > 0 ? "+" : "") + kzZahl(Math.round(d * 100) / 100);
       }
-      var einh = k.einheit === "%" ? "%" : "";
+      var einh = kzEinheit(k.einheit);
       var hoch = (wert === maxW || wert === minW) ? " class=\"hoch\"" : "";
       var zellen = "<td>" + jahr + "</td><td" + hoch + ">" +
         kzZahl(wert) + einh + "</td><td>" + diffTxt + "</td>";
@@ -1659,9 +1671,9 @@
         var wert = document.createElement("div");
         wert.className = "kz-wert";
         wert.textContent = letzte ? kzZahl(letzte[1]) : "\u2013";
-        if (k.einheit === "%") {
+        if (k.einheit) {
           var proz = document.createElement("small");
-          proz.textContent = "%";
+          proz.textContent = k.einheit === "%" ? "%" : " " + k.einheit;
           wert.appendChild(proz);
         }
         karte.appendChild(wert);
