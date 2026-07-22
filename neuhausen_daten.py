@@ -1470,7 +1470,8 @@ def baue_kennzahlen() -> None:
                 continue
             letzte_beurteilung = reihe[-1][2] if len(reihe[-1]) > 2 else ""
             jahr = reihe[-1][0]
-            pdf_url = fx.JAHRESRECHNUNGEN.get(jahr, "https://neuhausen.ch/finanzkennzahlen")
+            pdf_url = fin.get("quellen", {}).get(
+                jahr, "https://neuhausen.ch/finanzkennzahlen")
             karte("Finanzen", kz["name"], kz["einheit"],
                   [(p[0], p[1]) for p in reihe],
                   "Gemeinde Neuhausen, Jahresrechnung " + jahr, pdf_url,

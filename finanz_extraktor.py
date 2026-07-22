@@ -266,6 +266,74 @@ JAHRESRECHNUNGEN = {
     "2020": "https://neuhausen.ch/fileupload/Jahresrechnung 2020 durch ER genehmigt zwei.pdf",
 }
 
+# Ab diesem Jahr gilt HRM2 fuer die Gemeinden im Kanton Schaffhausen. Erst ab
+# dann hat die Jahresrechnung die standardisierte A8-Finanzkennzahlenseite.
+HRM2_AB_JAHR = 2020
+FINANZ_SEITE = "https://neuhausen.ch/finanzkennzahlen"
+
+
+def finde_jahresrechnungen(seiten_url=FINANZ_SEITE, fallback=None):
+    """Liest die Finanzseite der Gemeinde und erkennt automatisch alle
+    verlinkten Jahresrechnungen ab dem HRM2-Jahr. Neue Jahrgaenge werden so
+    ohne Code-Aenderung aufgearbeitet.
+
+    Nur echte Jahresrechnungen (nicht Geschaeftsbericht, Budget, Finanzplan)
+    werden beruecksichtigt. Bei Fehlern faellt die Funktion auf die fest
+    hinterlegte Liste zurueck, damit der Job nie an der Erkennung scheitert.
+
+    Rueckgabe: dict {jahr(str): pdf_url}."""
+    import urllib.request
+    import urllib.parse
+    import html as _html
+
+    fallback = fallback if fallback is not None else dict(JAHRESRECHNUNGEN)
+    try:
+        req = urllib.request.Request(seiten_url,
+                                     headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            roh = r.read().decode("utf-8", "replace")
+    except Exception:
+        return fallback
+
+    # Alle Links zu PDFs unter /fileupload/ mit ihrem sichtbaren Linktext.
+    # Muster deckt <a href="...">Text</a> ab.
+    gefunden = {}
+    muster = re.compile(
+        r'href="([^"]*?/fileupload/[^"]*?\.pdf)"[^>]*>\s*([^<]*?)\s*</a>',
+        re.IGNORECASE)
+    for treffer in muster.finditer(roh):
+        url_roh = _html.unescape(treffer.group(1))
+        linktext = _html.unescape(treffer.group(2))
+        # Nur echte Jahresrechnungen: Linktext beginnt mit "Jahresrechnung"
+        # und NICHT Geschaeftsbericht/Budget/Finanzplan/Rechnung des GR usw.
+        if not re.match(r"^\s*Jahresrechnung\b", linktext, re.IGNORECASE):
+            continue
+        # Jahr aus dem Linktext ziehen (verlaesslicher als aus dem Dateinamen)
+        m = re.search(r"(20\d{2})", linktext)
+        if not m:
+            m = re.search(r"(20\d{2})", url_roh)
+        if not m:
+            continue
+        jahr = m.group(1)
+        if int(jahr) < HRM2_AB_JAHR:
+            continue
+        # Absolute URL sicherstellen
+        if url_roh.startswith("http"):
+            voll = url_roh
+        else:
+            voll = urllib.parse.urljoin(seiten_url, url_roh)
+        # Nur den ersten Treffer je Jahr behalten (Seite listet neueste zuerst)
+        if jahr not in gefunden:
+            gefunden[jahr] = voll
+
+    if not gefunden:
+        return fallback
+    # Feste Liste als Sicherheitsnetz einmischen: gefundene haben Vorrang,
+    # fehlende Jahre aus dem Fallback ergaenzen.
+    ergebnis = dict(fallback)
+    ergebnis.update(gefunden)
+    return ergebnis
+
 # Die acht A8-Kennzahlen (fuer die Vollstaendigkeitspruefung)
 A8_SCHLUESSEL = [
     "nettoverschuldungsquotient", "selbstfinanzierungsgrad",
@@ -475,11 +543,15 @@ def baue_finanz_zeitreihen(lade_funktion=None):
     Gibt dict zurueck: {kennzahlen: {schluessel: {name, einheit, erklaerung,
     was_bedeutet, reihe: [[jahr, wert, beurteilung], ...], quelleUrl}}, jahre}."""
     lade = lade_funktion or _lade_pdf
+    # Jahrgaenge automatisch von der Finanzseite erkennen (mit Fallback auf
+    # die feste Liste). So werden neue Jahresrechnungen ohne Code-Aenderung
+    # aufgearbeitet.
+    jahrgaenge = finde_jahresrechnungen()
     pro_jahr = {}      # jahr -> extrahierte werte
     verwendet = []
-    for jahr in sorted(JAHRESRECHNUNGEN):
+    for jahr in sorted(jahrgaenge):
         try:
-            roh = lade(JAHRESRECHNUNGEN[jahr])
+            roh = lade(jahrgaenge[jahr])
             zeilen, _ = _zeilen_aus_bytes(roh)
             ueb = extrahiere_uebersicht(zeilen)
             a8 = extrahiere_a8_kennzahlen(zeilen)
@@ -493,6 +565,9 @@ def baue_finanz_zeitreihen(lade_funktion=None):
             verwendet.append(jahr)
         except Exception:
             continue
+
+    # Jahr-zu-PDF-Zuordnung der tatsaechlich verwendeten Jahrgaenge merken
+    quellen = {j: jahrgaenge[j] for j in verwendet}
 
     kennzahlen = {}
     # 1) Die acht A8-Kennzahlen
@@ -549,7 +624,7 @@ def baue_finanz_zeitreihen(lade_funktion=None):
             "reihe": reihe,
         }
 
-    return {"jahre": verwendet, "kennzahlen": kennzahlen}
+    return {"jahre": verwendet, "kennzahlen": kennzahlen, "quellen": quellen}
 
 
 def diagnose_finanz_json(lade_funktion=None):
@@ -567,8 +642,9 @@ def diagnose_uebersicht():
     print(f"{'Jahr':<6}{'A8':>5}{'Steuerf.':>10}{'Ergebnis':>10}"
           f"{'Proben':>9}{'Bilanz-Aktiven':>18}   Status")
     print(f"{'-' * 74}")
-    for jahr in sorted(JAHRESRECHNUNGEN, reverse=True):
-        url = JAHRESRECHNUNGEN[jahr]
+    jahrgaenge = finde_jahresrechnungen()
+    for jahr in sorted(jahrgaenge, reverse=True):
+        url = jahrgaenge[jahr]
         try:
             roh = _lade_pdf(url)
             zeilen, _ = _zeilen_aus_bytes(roh)
