@@ -146,19 +146,21 @@ def extrahiere_uebersicht(zeilen):
 
 
 def extrahiere_a8_kennzahlen(zeilen):
-    """Seite A8 Finanzkennzahlen: je Kennzahl (rechnung, vorjahr) in %.
-    Nutzt zuerst Prozent-Muster im Text; wenn das keine zwei Werte findet,
-    greift es auf die koordinatenbasierten Zahlen der Zeile zurueck (manche
-    Kennzahlen stehen mit raeumlich getrennten Prozentzeichen)."""
+    """Seite A8 Finanzkennzahlen. Nimmt pro Kennzahl NUR den ersten
+    (=aktuellen) Prozentwert. Die Zeitreihe wird spaeter aus mehreren
+    Jahrgaengen zusammengesetzt; die im PDF mitgelieferten Vorjahreswerte
+    werden bewusst ignoriert, weil im 2025er-PDF Zeilen ineinanderlaufen
+    (mehrere Werte je Zeile) und eine Fehlzuordnung riskieren.
+    Der jeweils erste Wert der Kennzahlenzeile ist verlaesslich der aktuelle."""
     kennzahlen = {}
     muster = {
-        "nettoverschuldungsquotient": r"Nettoverschuldungsquotient",
-        "selbstfinanzierungsgrad": r"Selbstfinanzierungsgrad",
-        "zinsbelastungsanteil": r"Zinsbelastungsanteil",
-        "selbstfinanzierungsanteil": r"Selbstfinanzierungsanteil",
-        "kapitaldienstanteil": r"Kapitaldienstanteil",
-        "bruttoverschuldungsanteil": r"Bruttoverschuldungsanteil",
-        "investitionsanteil": r"Investitionsanteil",
+        "nettoverschuldungsquotient": r"^Nettoverschuldungsquotient\b",
+        "selbstfinanzierungsgrad": r"^Selbstfinanzierungsgrad\b",
+        "zinsbelastungsanteil": r"^Zinsbelastungsanteil\b",
+        "selbstfinanzierungsanteil": r"^Selbstfinanzierungsanteil\b",
+        "kapitaldienstanteil": r"^Kapitaldienstanteil\b",
+        "bruttoverschuldungsanteil": r"^Bruttoverschuldungsanteil\b",
+        "investitionsanteil": r"^Investitionsanteil\b",
     }
     for text, zahlen in zeilen:
         z = text.strip()
@@ -166,20 +168,14 @@ def extrahiere_a8_kennzahlen(zeilen):
             if schluessel in kennzahlen:
                 continue
             if re.match(m, z):
-                proz = re.findall(r"(-?\d+(?:\.\d+)?)\s*%", z)
-                if len(proz) >= 2:
-                    kennzahlen[schluessel] = [float(proz[0]), float(proz[1])]
-                elif len(zahlen) >= 2:
-                    # Fallback: erste zwei Zahlen der Zeile (Rechnung, Vorjahr).
-                    # Nur Werte im plausiblen Prozentbereich (-1000..1000).
-                    kandidaten = [x for x in zahlen if -1000 <= x <= 1000]
-                    if len(kandidaten) >= 2:
-                        kennzahlen[schluessel] = [float(kandidaten[0]),
-                                                  float(kandidaten[1])]
+                # ersten Prozentwert der Zeile nehmen (= aktuelles Jahr)
+                proz = re.search(r"(-?\d+(?:\.\d+)?)\s*%", z)
+                if proz:
+                    kennzahlen[schluessel] = float(proz.group(1))
+        # Nettoschuld pro Kopf: erste Zahl der Zeile (Franken, kann negativ)
         if "nettoschuld_pro_kopf" not in kennzahlen \
-                and re.match(r"Nettoschuld I pro Einwohner", z):
-            if len(zahlen) >= 2:
-                kennzahlen["nettoschuld_pro_kopf"] = zahlen[:2]
+                and re.match(r"^Nettoschuld I pro Einwohner", z) and zahlen:
+            kennzahlen["nettoschuld_pro_kopf"] = zahlen[0]
     return kennzahlen
 
 
