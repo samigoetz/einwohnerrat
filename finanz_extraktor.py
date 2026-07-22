@@ -467,6 +467,64 @@ def beurteile(schluessel, wert):
     return ""
 
 
+# Ampel-Zuordnung der Labels (gleiche Logik wie im HTML/CSS).
+_AMPEL = {
+    "gruen": {"gut", "ideal", "sehr gut", "nettovermögen",
+              "geringe belastung", "geringe verschuldung"},
+    "orange": {"genügend", "mittel", "tragbare belastung", "problematisch",
+               "mittlere verschuldung", "hoch"},
+    "rot": {"schlecht", "kritisch", "ungenügend", "hohe belastung",
+            "hohe verschuldung", "sehr hohe verschuldung"},
+    "neutral": {"schwach", "sehr hoch"},
+}
+
+
+def _ampel_farbe(label):
+    l = label.lower()
+    for farbe, menge in _AMPEL.items():
+        if l in menge:
+            return farbe
+    return "neutral"
+
+
+def zonen_fuer(schluessel):
+    """Erzeugt die farbigen Bewertungszonen einer Kennzahl als Liste von
+    Baendern: [{"von": zahl|None, "bis": zahl|None, "farbe": "gruen"|...,
+    "label": str}, ...]. None bedeutet unbegrenzt nach unten/oben.
+    Nur fuer Kennzahlen mit bewertender Skala; sonst leere Liste."""
+    meta = KENNZAHL_META.get(schluessel)
+    if not meta:
+        return []
+    zonen = []
+    if meta["richtung"] == "hoch_gut":
+        # skala_hoch: (grenze, label), Wert >= grenze -> label.
+        # Absteigende Grenzen (z. B. 100 ideal, 80 gut, 50 problematisch, None)
+        eintraege = meta["skala_hoch"]
+        untergrenze = None  # laufende Untergrenze der aktuellen Zone
+        # Reihenfolge: von hoechster Grenze abwaerts. Baender von unten bauen.
+        # Wir kehren um, damit "von/bis" sauber aufsteigend werden.
+        vorherige = None
+        for grenze, label in eintraege:
+            # Zone: [grenze, vorherige)  (vorherige = obere Grenze oder None)
+            zonen.append({"von": grenze, "bis": vorherige,
+                          "farbe": _ampel_farbe(label), "label": label})
+            vorherige = grenze
+    else:
+        # tief_gut oder neutral: (grenze, label), Wert < grenze -> label.
+        # Aufsteigende Grenzen (z. B. 4 gut, 9 genügend, None schlecht)
+        eintraege = meta["skala"]
+        # Bei neutraler Kennzahl (Investitionsanteil) gibt es keine Wertung,
+        # daher alle Zonen neutral einfaerben.
+        neutral = meta["richtung"] == "neutral"
+        untergrenze = None
+        for grenze, label in eintraege:
+            farbe = "neutral" if neutral else _ampel_farbe(label)
+            zonen.append({"von": untergrenze, "bis": grenze,
+                          "farbe": farbe, "label": label})
+            untergrenze = grenze
+    return zonen
+
+
 def _lade_pdf(url):
     import urllib.request
     import urllib.parse
@@ -584,6 +642,7 @@ def baue_finanz_zeitreihen(lade_funktion=None):
                 "erklaerung": meta["erklaerung"],
                 "was_bedeutet": meta["was_bedeutet"],
                 "reihe": reihe,
+                "zonen": zonen_fuer(sch),
             }
 
     # 2) Steuerfuesse (natuerliche + juristische Personen)

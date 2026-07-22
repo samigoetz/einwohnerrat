@@ -1481,6 +1481,7 @@ def baue_kennzahlen() -> None:
                       "beurteilung": letzte_beurteilung,
                       "beurteilungen": [
                           [p[0], p[2] if len(p) > 2 else ""] for p in reihe],
+                      "zonen": kz.get("zonen", []),
                   })
             anzahl += 1
         if anzahl:

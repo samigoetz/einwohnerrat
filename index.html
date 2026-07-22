@@ -338,6 +338,9 @@
   .kz-dialog-zu:hover { background: var(--rot); color: var(--weiss); border-color: var(--rot); }
   .kz-dialog-unter { font-size: 12.5px; color: var(--grau); margin-bottom: 18px; }
   .kz-dialog-erklaerung { font-size: 14px; line-height: 1.5; margin-bottom: 10px; }
+  .kz-zonen-legende { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 12px 0 4px; }
+  .kz-zonen-item { display: inline-flex; align-items: center; font-size: 11.5px; color: var(--grau); }
+  .kz-zonen-punkt { display: inline-block; width: 11px; height: 11px; margin-right: 5px; opacity: 0.55; }
   .kz-dialog-wasbedeutet { font-size: 13px; line-height: 1.5; color: var(--grau); margin-bottom: 18px; padding: 10px 12px; background: #FAFAF8; border-left: 3px solid var(--rot); }
   .kz-graph { width: 100%; }
   .kz-graph svg { display: block; width: 100%; height: auto; }
@@ -1286,7 +1289,7 @@
     svg.appendChild(punkt);
     return svg;
   }
-  function kzGrossgraph(reihe, einheit) {
+  function kzGrossgraph(reihe, einheit, zonen) {
     // Voll beschriftete Liniengrafik ueber ALLE Jahre, mit Achsen,
     // Werteskala, Jahresbeschriftung und Punkten je Jahr.
     var ns = "http://www.w3.org/2000/svg";
@@ -1308,6 +1311,33 @@
     var svg = document.createElementNS(ns, "svg");
     svg.setAttribute("viewBox", "0 0 " + B + " " + H);
     svg.setAttribute("role", "img");
+
+    // Farbige Bewertungszonen als transparente Baender (hinter allem).
+    // Nur im sichtbaren Wertebereich, mit hoher Transparenz.
+    var zonenFarben = {
+      gruen: "#1D7A3E", orange: "#C8860D", rot: "#E2001A", neutral: "#9A9A98"
+    };
+    if (zonen && zonen.length) {
+      zonen.forEach(function (z) {
+        // Zonengrenzen auf den sichtbaren Bereich beschneiden
+        var oberW = (z.bis === null || z.bis === undefined) ? max : z.bis;
+        var unterW = (z.von === null || z.von === undefined) ? min : z.von;
+        oberW = Math.min(oberW, max); unterW = Math.max(unterW, min);
+        if (oberW <= unterW) return;  // Zone ausserhalb des Sichtbereichs
+        var yOben = py(oberW), yUnten = py(unterW);
+        var rect = document.createElementNS(ns, "rect");
+        rect.setAttribute("x", links);
+        rect.setAttribute("y", yOben.toFixed(1));
+        rect.setAttribute("width", iB);
+        rect.setAttribute("height", (yUnten - yOben).toFixed(1));
+        rect.setAttribute("fill", zonenFarben[z.farbe] || zonenFarben.neutral);
+        rect.setAttribute("fill-opacity", "0.09");
+        var t = document.createElementNS(ns, "title");
+        t.textContent = z.label;
+        rect.appendChild(t);
+        svg.appendChild(rect);
+      });
+    }
 
     // Horizontale Hilfslinien + Y-Beschriftung (5 Stufen)
     for (var s = 0; s <= 4; s++) {
@@ -1405,8 +1435,28 @@
 
     var graph = document.createElement("div");
     graph.className = "kz-graph";
-    graph.appendChild(kzGrossgraph(reihe, k.einheit));
+    graph.appendChild(kzGrossgraph(reihe, k.einheit, k.zonen));
     dialog.appendChild(graph);
+    // Legende der Bewertungszonen (nur wenn Zonen vorhanden)
+    if (k.zonen && k.zonen.length) {
+      var leg = document.createElement("div");
+      leg.className = "kz-zonen-legende";
+      var farbCode = {
+        gruen: "#1D7A3E", orange: "#C8860D", rot: "#E2001A", neutral: "#9A9A98"
+      };
+      // Zonen von oben (bester/hoechster) nach unten fuer die Legende
+      k.zonen.slice().reverse().forEach(function (z) {
+        var item = document.createElement("span");
+        item.className = "kz-zonen-item";
+        var punkt = document.createElement("span");
+        punkt.className = "kz-zonen-punkt";
+        punkt.style.background = farbCode[z.farbe] || farbCode.neutral;
+        item.appendChild(punkt);
+        item.appendChild(document.createTextNode(z.label));
+        leg.appendChild(item);
+      });
+      dialog.appendChild(leg);
+    }
 
     // Wertetabelle, neueste Jahre zuerst
     var tab = document.createElement("table");
