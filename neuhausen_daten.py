@@ -2644,11 +2644,28 @@ def diagnose_leerwohnung():
                         wb = openpyxl.load_workbook(io.BytesIO(d.content),
                                                     read_only=True, data_only=True)
                         print(f"        Blaetter: {wb.sheetnames}")
-                        for nm in wb.sheetnames[:1]:
-                            for i, row in enumerate(wb[nm].iter_rows(values_only=True)):
-                                if i >= 6:
+                        # Neuhausen im Jahresblatt suchen und Umfeld zeigen
+                        for nm in wb.sheetnames:
+                            if not re.search(r"(19|20)\d{2}", nm):
+                                continue
+                            alle = [list(r) for r in
+                                    wb[nm].iter_rows(values_only=True)]
+                            # Kopfzeilen (erste 6) zeigen
+                            print(f"        --- Blatt {nm!r}: Kopf ---")
+                            for i in range(min(6, len(alle))):
+                                print(f"          K{i}: {alle[i][:9]}")
+                            # Neuhausen-Zeile finden
+                            for i, row in enumerate(alle):
+                                rtext = " ".join(str(z) for z in row[:3]
+                                                 if z is not None).lower()
+                                if "neuhausen am rheinfall" in rtext or \
+                                        re.search(r"\b2937\b", rtext):
+                                    print(f"        Neuhausen in Zeile {i}:")
+                                    print(f"          {row[:12]}")
                                     break
-                                print(f"          {i}: {list(row)[:7]}")
+                            else:
+                                print(f"        (Neuhausen in {nm!r} nicht gefunden)")
+                            break   # nur das erste (neueste) Jahresblatt
                         zu_pruefen = []
                         break
                     probe = d.content[:4000].decode("utf-8-sig", "replace").lstrip()
