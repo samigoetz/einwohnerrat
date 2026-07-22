@@ -272,6 +272,50 @@
   .kz-karte.kz-nichtklickbar { cursor: default; }
   .kz-karte.kz-nichtklickbar:hover { background: none; }
   .kz-mehr { font-size: 10.5px; font-weight: 700; color: var(--rot); margin-top: 9px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .kz-beurteilung {
+    display: inline-block; margin-top: 8px; padding: 2px 9px;
+    font-size: 11.5px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.03em; border: 1.5px solid var(--schwarz);
+  }
+  /* gruen = gut */
+  .kz-beurteilung.gut, .kz-beurteilung.ideal, .kz-beurteilung.sehrgut,
+  .kz-beurteilung.nettovermoegen, .kz-beurteilung.geringebelastung,
+  .kz-beurteilung.geringeverschuldung {
+    background: #1D7A3E; color: var(--weiss); border-color: #1D7A3E;
+  }
+  /* orange = mittel */
+  .kz-beurteilung.genuegend, .kz-beurteilung.mittel,
+  .kz-beurteilung.tragbarebelastung, .kz-beurteilung.problematisch,
+  .kz-beurteilung.mittlereverschuldung, .kz-beurteilung.hoch {
+    background: #C8860D; color: var(--weiss); border-color: #C8860D;
+  }
+  /* rot = schlecht */
+  .kz-beurteilung.schlecht, .kz-beurteilung.kritisch,
+  .kz-beurteilung.ungenuegend, .kz-beurteilung.hohebelastung,
+  .kz-beurteilung.hoheverschuldung, .kz-beurteilung.sehrhoheverschuldung {
+    background: var(--rot); color: var(--weiss); border-color: var(--rot);
+  }
+  /* neutral (schwach, sehr hoch = Investitionstaetigkeit, keine Wertung) */
+  .kz-beurteilung.schwach, .kz-beurteilung.sehrhoch {
+    background: var(--weiss); color: var(--schwarz);
+  }
+  .kz-info {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 17px; height: 17px; border-radius: 50%; border: 1.5px solid var(--grau);
+    color: var(--grau); font-size: 11px; font-weight: 700; margin-left: 7px;
+    cursor: help; position: relative; font-style: italic; font-family: Georgia, serif;
+  }
+  .kz-info:hover { border-color: var(--rot); color: var(--rot); }
+  .kz-tooltip {
+    position: absolute; bottom: 140%; left: 50%; transform: translateX(-50%);
+    width: 250px; background: var(--schwarz); color: var(--weiss);
+    padding: 10px 12px; font-size: 12px; line-height: 1.45; font-style: normal;
+    font-family: inherit; font-weight: 400; text-transform: none; letter-spacing: 0;
+    z-index: 30; opacity: 0; pointer-events: none; transition: opacity 0.12s;
+  }
+  .kz-tooltip strong { display: block; margin-bottom: 4px; font-weight: 700; }
+  .kz-tooltip .tt-wert { margin-top: 6px; color: #C9C9C7; }
+  .kz-info:hover .kz-tooltip { opacity: 1; }
 
   .kz-overlay {
     position: fixed; inset: 0; z-index: 100;
@@ -293,6 +337,8 @@
   }
   .kz-dialog-zu:hover { background: var(--rot); color: var(--weiss); border-color: var(--rot); }
   .kz-dialog-unter { font-size: 12.5px; color: var(--grau); margin-bottom: 18px; }
+  .kz-dialog-erklaerung { font-size: 14px; line-height: 1.5; margin-bottom: 10px; }
+  .kz-dialog-wasbedeutet { font-size: 13px; line-height: 1.5; color: var(--grau); margin-bottom: 18px; padding: 10px 12px; background: #FAFAF8; border-left: 3px solid var(--rot); }
   .kz-graph { width: 100%; }
   .kz-graph svg { display: block; width: 100%; height: auto; }
   .kz-tabelle { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 13px; }
@@ -1343,6 +1389,19 @@
     unter.textContent = "Verlauf " + reihe[0][0] + " bis " + letzte[0] +
       " \u00b7 " + reihe.length + " Jahre";
     dialog.appendChild(unter);
+    // Erklaerung und Werte-Einordnung (bei Finanzkennzahlen)
+    if (k.erklaerung) {
+      var erkl = document.createElement("div");
+      erkl.className = "kz-dialog-erklaerung";
+      erkl.textContent = k.erklaerung;
+      dialog.appendChild(erkl);
+    }
+    if (k.wasBedeutet) {
+      var wasb = document.createElement("div");
+      wasb.className = "kz-dialog-wasbedeutet";
+      wasb.textContent = k.wasBedeutet;
+      dialog.appendChild(wasb);
+    }
 
     var graph = document.createElement("div");
     graph.className = "kz-graph";
@@ -1353,7 +1412,15 @@
     var tab = document.createElement("table");
     tab.className = "kz-tabelle";
     var thead = document.createElement("thead");
-    thead.innerHTML = "<tr><th>Jahr</th><th>Wert</th><th>Ver\u00e4nderung</th></tr>";
+    // Beurteilungen als Nachschlage-Map (Jahr -> Label)
+    var beurtMap = {};
+    if (k.beurteilungen) {
+      k.beurteilungen.forEach(function (b) { beurtMap[b[0]] = b[1]; });
+    }
+    var hatBeurt = k.beurteilungen && k.beurteilungen.some(function (b) { return b[1]; });
+    thead.innerHTML = hatBeurt
+      ? "<tr><th>Jahr</th><th>Wert</th><th>Ver\u00e4nderung</th><th>Beurteilung</th></tr>"
+      : "<tr><th>Jahr</th><th>Wert</th><th>Ver\u00e4nderung</th></tr>";
     tab.appendChild(thead);
     var tbody = document.createElement("tbody");
     for (var i = reihe.length - 1; i >= 0; i--) {
@@ -1366,8 +1433,12 @@
       }
       var einh = k.einheit === "%" ? "%" : "";
       var hoch = (wert === maxW || wert === minW) ? " class=\"hoch\"" : "";
-      tr.innerHTML = "<td>" + jahr + "</td><td" + hoch + ">" +
+      var zellen = "<td>" + jahr + "</td><td" + hoch + ">" +
         kzZahl(wert) + einh + "</td><td>" + diffTxt + "</td>";
+      if (hatBeurt) {
+        zellen += "<td>" + (beurtMap[jahr] || "\u2013") + "</td>";
+      }
+      tr.innerHTML = zellen;
       tbody.appendChild(tr);
     }
     tab.appendChild(tbody);
@@ -1426,6 +1497,25 @@
         karte.className = "kz-karte";
         var name = document.createElement("div");
         name.className = "kz-name"; name.textContent = k.name;
+        // Info-Symbol mit Erklaerung (nur wenn Erklaerung vorhanden)
+        if (k.erklaerung) {
+          var info = document.createElement("span");
+          info.className = "kz-info"; info.textContent = "i";
+          var tip = document.createElement("span");
+          tip.className = "kz-tooltip";
+          var tstark = document.createElement("strong");
+          tstark.textContent = k.name;
+          tip.appendChild(tstark);
+          tip.appendChild(document.createTextNode(k.erklaerung));
+          if (k.wasBedeutet) {
+            var wb = document.createElement("span");
+            wb.className = "tt-wert";
+            wb.textContent = k.wasBedeutet;
+            tip.appendChild(wb);
+          }
+          info.appendChild(tip);
+          name.appendChild(info);
+        }
         karte.appendChild(name);
         if (k.typ === "vergleich") {
           karte.className = "kz-karte kz-nichtklickbar";
@@ -1493,6 +1583,16 @@
           delta.textContent = "Stand " + letzte[0];
         }
         karte.appendChild(delta);
+        // Amtliche Beurteilung als farbige Badge (nur Finanzkennzahlen)
+        if (k.beurteilung) {
+          var bew = document.createElement("div");
+          var klasse = k.beurteilung.toLowerCase()
+            .replace(/\u00e4/g, "ae").replace(/\u00f6/g, "oe")
+            .replace(/\u00fc/g, "ue").replace(/\s+/g, "");
+          bew.className = "kz-beurteilung " + klasse;
+          bew.textContent = k.beurteilung;
+          karte.appendChild(bew);
+        }
         if (reihe.length >= 3) {
           var spark = document.createElement("div");
           spark.className = "kz-spark";

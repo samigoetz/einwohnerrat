@@ -274,6 +274,130 @@ A8_SCHLUESSEL = [
     "investitionsanteil", "nettoschuld_pro_kopf",
 ]
 
+# Kennzahlen-Metadaten. Quellen: HRM2-Fachempfehlung 18 (Konferenz der
+# kantonalen Aufsichtsstellen ueber die Gemeindefinanzen KKAG) sowie die
+# Beurteilungsskalen der Jahresrechnung Neuhausen (Seite A8). Die Erklaerungen
+# sind bewusst laienverstaendlich gehalten.
+# Struktur je Kennzahl:
+#   name, einheit, erklaerung (Tooltip), was_bedeutet (Werte-Einordnung),
+#   skala: Liste (grenze_pruef, label) - wird der Reihe nach geprueft,
+#          richtung "hoch_gut" oder "tief_gut" bestimmt die Bewertung.
+KENNZAHL_META = {
+    "nettoverschuldungsquotient": {
+        "name": "Nettoverschuldungsquotient",
+        "einheit": "%",
+        "erklaerung": "Zeigt, welcher Anteil der Steuereinnahmen nötig wäre, "
+                      "um die Nettoschulden vollständig abzuzahlen. Ein "
+                      "negativer Wert bedeutet Nettovermögen statt Schulden.",
+        "was_bedeutet": "Unter 100 % gilt als gut, 100–150 % als genügend, "
+                        "über 150 % als schlecht. Je tiefer, desto besser.",
+        "richtung": "tief_gut",
+        "skala": [(100, "gut"), (150, "genügend"), (250, "schlecht"),
+                  (None, "kritisch")],
+    },
+    "selbstfinanzierungsgrad": {
+        "name": "Selbstfinanzierungsgrad",
+        "einheit": "%",
+        "erklaerung": "Zeigt, welcher Anteil der Investitionen die Gemeinde "
+                      "aus eigenen Mitteln bezahlen kann, ohne neue Schulden "
+                      "aufzunehmen.",
+        "was_bedeutet": "Über 100 % ist ideal (Schuldenabbau möglich), "
+                        "80–100 % gut, 50–80 % problematisch, unter 50 % "
+                        "ungenügend. Schwankt von Jahr zu Jahr stark.",
+        "richtung": "hoch_gut",
+        "skala_hoch": [(100, "ideal"), (80, "gut"), (50, "problematisch"),
+                       (None, "ungenügend")],
+    },
+    "zinsbelastungsanteil": {
+        "name": "Zinsbelastungsanteil",
+        "einheit": "%",
+        "erklaerung": "Zeigt, welcher Anteil der laufenden Einnahmen für "
+                      "Nettozinsen gebunden ist. Je tiefer, desto grösser der "
+                      "finanzielle Spielraum.",
+        "was_bedeutet": "0–4 % gilt als gut, 4–9 % als genügend, "
+                        "über 9 % als schlecht.",
+        "richtung": "tief_gut",
+        "skala": [(4, "gut"), (9, "genügend"), (None, "schlecht")],
+    },
+    "selbstfinanzierungsanteil": {
+        "name": "Selbstfinanzierungsanteil",
+        "einheit": "%",
+        "erklaerung": "Zeigt, welcher Anteil der Einnahmen für Investitionen "
+                      "oder Schuldenabbau zur Verfügung steht. Ein Mass für "
+                      "die finanzielle Leistungsfähigkeit.",
+        "was_bedeutet": "Über 20 % gilt als gut, 10–20 % als mittel, "
+                        "unter 10 % als schlecht. Je höher, desto besser.",
+        "richtung": "hoch_gut",
+        "skala_hoch": [(20, "gut"), (10, "mittel"), (None, "schlecht")],
+    },
+    "kapitaldienstanteil": {
+        "name": "Kapitaldienstanteil",
+        "einheit": "%",
+        "erklaerung": "Zeigt, welcher Anteil der laufenden Einnahmen durch "
+                      "Zinsen und Abschreibungen gebunden ist. Je tiefer, "
+                      "desto tragbarer.",
+        "was_bedeutet": "Bis 5 % geringe Belastung, 5–15 % tragbar, "
+                        "über 15 % hohe Belastung.",
+        "richtung": "tief_gut",
+        "skala": [(5, "geringe Belastung"), (15, "tragbare Belastung"),
+                  (None, "hohe Belastung")],
+    },
+    "bruttoverschuldungsanteil": {
+        "name": "Bruttoverschuldungsanteil",
+        "einheit": "%",
+        "erklaerung": "Setzt die gesamten Schulden ins Verhältnis zu den "
+                      "Einnahmen. Zeigt, ob die Verschuldung im Verhältnis "
+                      "zur Wirtschaftskraft angemessen ist.",
+        "was_bedeutet": "Unter 50 % sehr gut, 50–100 % gut, 100–150 % mittel, "
+                        "150–200 % schlecht, über 200 % kritisch.",
+        "richtung": "tief_gut",
+        "skala": [(50, "sehr gut"), (100, "gut"), (150, "mittel"),
+                  (200, "schlecht"), (None, "kritisch")],
+    },
+    "investitionsanteil": {
+        "name": "Investitionsanteil",
+        "einheit": "%",
+        "erklaerung": "Zeigt, wie aktiv die Gemeinde investiert, gemessen am "
+                      "Anteil der Investitionen an den Gesamtausgaben.",
+        "was_bedeutet": "Unter 10 % schwache, 10–20 % mittlere, 20–30 % hohe, "
+                        "über 30 % sehr hohe Investitionstätigkeit. Keine "
+                        "Kennzahl von gut oder schlecht, sondern der Aktivität.",
+        "richtung": "neutral",
+        "skala": [(10, "schwach"), (20, "mittel"), (30, "hoch"),
+                  (None, "sehr hoch")],
+    },
+    "nettoschuld_pro_kopf": {
+        "name": "Nettoschuld pro Einwohner:in",
+        "einheit": "CHF",
+        "erklaerung": "Die Nettoschuld (Schulden minus Finanzvermögen) verteilt "
+                      "auf alle Einwohner:innen. Ein negativer Wert bedeutet "
+                      "Nettovermögen pro Kopf statt Schulden.",
+        "was_bedeutet": "Unter 0 = Nettovermögen. 0–1'000 geringe, "
+                        "1'000–2'500 mittlere, 2'500–5'000 hohe, über 5'000 "
+                        "sehr hohe Verschuldung pro Kopf.",
+        "richtung": "tief_gut",
+        "skala": [(0, "Nettovermögen"), (1000, "geringe Verschuldung"),
+                  (2500, "mittlere Verschuldung"), (5000, "hohe Verschuldung"),
+                  (None, "sehr hohe Verschuldung")],
+    },
+}
+
+
+def beurteile(schluessel, wert):
+    """Amtliche Beurteilung eines Kennzahlenwerts (z. B. 'gut', 'ideal')."""
+    meta = KENNZAHL_META.get(schluessel)
+    if not meta or wert is None:
+        return ""
+    if meta["richtung"] == "hoch_gut":
+        for grenze, label in meta["skala_hoch"]:
+            if grenze is None or wert >= grenze:
+                return label
+    else:
+        for grenze, label in meta["skala"]:
+            if grenze is None or wert < grenze:
+                return label
+    return ""
+
 
 def _lade_pdf(url):
     import urllib.request
@@ -341,6 +465,98 @@ def diagnose():
         print(f"\n  Ergebnis {jahr}: {len(a8)}/8 A8-Kennzahlen, "
               f"{sum(1 for _, ok, _ in proben if ok)}/{len(proben)} Proben ok")
     print(f"\n{'=' * 60}\nEnde Finanz-Diagnose\n{'=' * 60}")
+
+
+def baue_finanz_zeitreihen(lade_funktion=None):
+    """Laeuft ueber alle Jahrgaenge, extrahiert die geprueften Kennzahlen und
+    baut die Zeitreihen fuer den Finanz-Bereich. Nur Jahre, deren
+    Kontrollsummen aufgehen, fliessen ein (Qualitaetstor).
+    `lade_funktion(url) -> bytes` ist injizierbar (fuer Tests).
+    Gibt dict zurueck: {kennzahlen: {schluessel: {name, einheit, erklaerung,
+    was_bedeutet, reihe: [[jahr, wert, beurteilung], ...], quelleUrl}}, jahre}."""
+    lade = lade_funktion or _lade_pdf
+    pro_jahr = {}      # jahr -> extrahierte werte
+    verwendet = []
+    for jahr in sorted(JAHRESRECHNUNGEN):
+        try:
+            roh = lade(JAHRESRECHNUNGEN[jahr])
+            zeilen, _ = _zeilen_aus_bytes(roh)
+            ueb = extrahiere_uebersicht(zeilen)
+            a8 = extrahiere_a8_kennzahlen(zeilen)
+            bil = extrahiere_bilanz_summen(zeilen)
+            proben = pruefe(ueb, bil)
+            # Qualitaetstor: Bilanzprobe muss aufgehen
+            bilanz_ok = any(ok for n, ok, _ in proben if "Bilanz" in n)
+            if not bilanz_ok:
+                continue
+            pro_jahr[jahr] = {"a8": a8, "ueb": ueb}
+            verwendet.append(jahr)
+        except Exception:
+            continue
+
+    kennzahlen = {}
+    # 1) Die acht A8-Kennzahlen
+    for sch in A8_SCHLUESSEL:
+        meta = KENNZAHL_META[sch]
+        reihe = []
+        for jahr in sorted(pro_jahr):
+            wert = pro_jahr[jahr]["a8"].get(sch)
+            if wert is not None:
+                reihe.append([jahr, wert, beurteile(sch, wert)])
+        if reihe:
+            kennzahlen[sch] = {
+                "name": meta["name"], "einheit": meta["einheit"],
+                "erklaerung": meta["erklaerung"],
+                "was_bedeutet": meta["was_bedeutet"],
+                "reihe": reihe,
+            }
+
+    # 2) Steuerfuesse (natuerliche + juristische Personen)
+    for sch, idx, name in (("steuerfuss_np", 0, "Steuerfuss natürliche Personen"),
+                           ("steuerfuss_jp", 1, "Steuerfuss juristische Personen")):
+        reihe = []
+        for jahr in sorted(pro_jahr):
+            werte = pro_jahr[jahr]["ueb"].get(sch)
+            if werte:
+                reihe.append([jahr, werte[0], ""])
+        if reihe:
+            kennzahlen[sch] = {
+                "name": name, "einheit": "%",
+                "erklaerung": "Der Steuerfuss bestimmt, wie viel Gemeindesteuer "
+                              "auf Basis der einfachen Kantonssteuer erhoben "
+                              "wird. Ein tieferer Steuerfuss bedeutet tiefere "
+                              "Steuern.",
+                "was_bedeutet": "In Prozent der einfachen Staatssteuer. "
+                                "Neuhausen senkte den Steuerfuss natürlicher "
+                                "Personen zuletzt.",
+                "reihe": reihe,
+            }
+
+    # 3) Ergebnis der Erfolgsrechnung (Ertrags-/Aufwandueberschuss)
+    reihe = []
+    for jahr in sorted(pro_jahr):
+        erg = pro_jahr[jahr]["ueb"].get("ergebnis_er")
+        if erg:
+            reihe.append([jahr, erg[0], ""])
+    if reihe:
+        kennzahlen["ergebnis_er"] = {
+            "name": "Ergebnis Erfolgsrechnung", "einheit": "CHF",
+            "erklaerung": "Das Jahresergebnis der Gemeinde: Überschuss (positiv) "
+                          "oder Fehlbetrag (negativ) aus allen Erträgen und "
+                          "Aufwänden eines Jahres.",
+            "was_bedeutet": "Ein positiver Wert bedeutet, dass die Gemeinde mehr "
+                            "eingenommen als ausgegeben hat.",
+            "reihe": reihe,
+        }
+
+    return {"jahre": verwendet, "kennzahlen": kennzahlen}
+
+
+def diagnose_finanz_json(lade_funktion=None):
+    """Gibt die fertige Finanz-Struktur als JSON aus (zur Kontrolle)."""
+    import json
+    daten = baue_finanz_zeitreihen(lade_funktion)
+    print(json.dumps(daten, ensure_ascii=False, indent=2))
 
 
 def diagnose_uebersicht():

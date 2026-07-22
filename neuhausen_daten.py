@@ -51,7 +51,7 @@ PRESSE_LEAD_MAX_PRO_LAUF = 40    # so viele fehlende Leads werden pro Lauf gehol
 PRESSE_RUECKFUELL_AB_JAHR = 2020
 KENNZAHLEN_AUSGABE = BASIS / "kennzahlen.js"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 8          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 9          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -1286,7 +1286,8 @@ def baue_kennzahlen() -> None:
     bereiche = []
     fehler = []
 
-    def karte(bereich_titel, name, einheit, reihe, quelle, quelle_url, hinweis=""):
+    def karte(bereich_titel, name, einheit, reihe, quelle, quelle_url,
+              hinweis="", extra=None):
         for b in bereiche:
             if b["titel"] == bereich_titel:
                 ziel = b
@@ -1294,11 +1295,14 @@ def baue_kennzahlen() -> None:
         else:
             ziel = {"titel": bereich_titel, "karten": []}
             bereiche.append(ziel)
-        ziel["karten"].append({
+        eintrag = {
             "name": name, "einheit": einheit,
-            "reihe": [[j, w] for j, w in reihe],
+            "reihe": [list(p) for p in reihe],
             "quelle": quelle, "quelleUrl": quelle_url, "hinweis": hinweis,
-        })
+        }
+        if extra:
+            eintrag.update(extra)
+        ziel["karten"].append(eintrag)
 
     # --- Bevoelkerung (BFS, demografische Bilanz je Gemeinde) ---
     # Der Wuerfel schluesselt nach Staatsangehoerigkeit (Einzellaender + Total)
@@ -1453,20 +1457,42 @@ def baue_kennzahlen() -> None:
     except Exception as e:
         fehler.append(f"Stimmberechtigte: {e}")
 
-    # --- Steuerfuesse (Kanton Schaffhausen, verifizierte Werte) ---
-    steuer_url = "https://sh.ch/CMS/get/file/40a314f4-33a6-49d6-a6fa-da4c8868ab1b"
-    karte("Steuern", "Steuerfuss natürliche Personen", "%",
-          [("2025", 83)], "Kanton Schaffhausen, Steuerfüsse 2025", steuer_url,
-          "Zeitreihe folgt, sobald eine maschinenlesbare amtliche Quelle verfügbar ist")
-    karte("Steuern", "Steuerfuss juristische Personen", "%",
-          [("2025", 93)], "Kanton Schaffhausen, Steuerfüsse 2025", steuer_url,
-          "Zeitreihe folgt, sobald eine maschinenlesbare amtliche Quelle verfügbar ist")
+    # --- Finanzen (aus den Gemeinde-Jahresrechnungen, HRM2 ab 2020) ---
+    # Nutzt den Finanz-Extraktor; jede Kennzahl ist durch Kontrollsummen
+    # abgesichert. Enthaelt auch die Steuerfuesse als echte Zeitreihe.
+    try:
+        import finanz_extraktor as fx
+        fin = fx.baue_finanz_zeitreihen()
+        anzahl = 0
+        for sch, kz in fin["kennzahlen"].items():
+            reihe = kz["reihe"]  # [[jahr, wert, beurteilung], ...]
+            if not reihe:
+                continue
+            letzte_beurteilung = reihe[-1][2] if len(reihe[-1]) > 2 else ""
+            jahr = reihe[-1][0]
+            pdf_url = fx.JAHRESRECHNUNGEN.get(jahr, "https://neuhausen.ch/finanzkennzahlen")
+            karte("Finanzen", kz["name"], kz["einheit"],
+                  [(p[0], p[1]) for p in reihe],
+                  "Gemeinde Neuhausen, Jahresrechnung " + jahr, pdf_url,
+                  extra={
+                      "erklaerung": kz.get("erklaerung", ""),
+                      "wasBedeutet": kz.get("was_bedeutet", ""),
+                      "beurteilung": letzte_beurteilung,
+                      "beurteilungen": [
+                          [p[0], p[2] if len(p) > 2 else ""] for p in reihe],
+                  })
+            anzahl += 1
+        if anzahl:
+            print(f"  Kennzahlen: Finanzen {anzahl} Kennzahlen aus "
+                  f"{len(fin['jahre'])} Jahrgaengen ({', '.join(fin['jahre'])})")
+    except Exception as e:
+        fehler.append(f"Finanzen: {e}")
 
     for f in fehler:
         print(f"    Kennzahl nicht abrufbar: {f}", file=sys.stderr)
 
     bfs_karten = sum(len(b["karten"]) for b in bereiche
-                     if b["titel"] != "Steuern")
+                     if b["titel"] not in ("Steuern", "Finanzen"))
     if bfs_karten == 0 and KENNZAHLEN_AUSGABE.exists():
         print("  Kennzahlen: BFS nicht erreichbar, bestehende Datei bleibt",
               file=sys.stderr)
