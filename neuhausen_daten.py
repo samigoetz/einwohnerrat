@@ -68,7 +68,7 @@ GEMEINNUETZIG_ASSET = "https://dam-api.bfs.admin.ch/hub/api/dam/assets/16564299/
 # Die Dataflow-Kennung wird per Diagnose am echten System verifiziert.
 SDMX_BESTAND = "CH1.GWS,DF_GWS_WHG_1,1.0.0"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 22          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 23          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -1361,8 +1361,14 @@ def _leerwohnung_bestand(bfs_nr: str = "2937") -> tuple:
             df_zu_dsd[dfid] = dfid.replace("DF_", "DSD_")
 
     # 2) Fuer jeden Dataflow die Dimensionen pruefen; nur die mit
-    #    gemeindefaehiger Regionsdimension weiterverfolgen.
-    for dfid, dsd in df_zu_dsd.items():
+    #    gemeindefaehiger Regionsdimension weiterverfolgen. DF_GWS_REG5 ist
+    #    der verifizierte Wohnungsbestand-Datenfluss (Gemeindeebene) und wird
+    #    zuerst geprueft; die uebrigen bleiben als Rueckfallebene.
+    bevorzugt = "DF_GWS_REG5"
+    reihenfolge = ([bevorzugt] if bevorzugt in df_zu_dsd else []) + \
+                  [d for d in df_zu_dsd if d != bevorzugt]
+    for dfid in reihenfolge:
+        dsd = df_zu_dsd[dfid]
         try:
             dims = _sdmx_struktur_dimensionen(dsd)
         except Exception:
@@ -1465,6 +1471,52 @@ def _re_jahr(s: str) -> bool:
     return bool(re.match(r"^(19|20)\d{2}$", s or ""))
 
 
+def _anzahl_aus_gemeinde() -> dict:
+    """Liest die Anzahl leer stehender Wohnungen je Jahr aus der amtlichen
+    Gemeinde-Meldung ('1. Juni JJJJ NN Wohnungen P.PP %'). Ergaenzt die
+    neuesten Jahre, die im BFS-Dataflow noch fehlen. Gibt {jahr: anzahl}."""
+    roh = requests.get(AKTUELLES_URL, headers=HEADERS, timeout=60)
+    roh.raise_for_status()
+    anzahl = {}
+    for m in re.finditer(
+            r"1\.\s*Juni\s*(20\d{2})\s+(\d+)\s+Wohnungen", roh.text):
+        jahr, zahl = m.group(1), m.group(2)
+        try:
+            wert = int(zahl)
+            if 0 <= wert <= 5000 and jahr not in anzahl:
+                anzahl[jahr] = wert
+        except ValueError:
+            continue
+    return anzahl
+
+
+def _bestand_aus_gemeinde() -> dict:
+    """Liest den Wohnungsbestand je Jahr aus der amtlichen Aktuelles-Meldung
+    der Gemeinde ('Auf der Basis von N Wohnungen ...'). Ergaenzt die neuesten
+    Jahre, die im GWS-Dataflow noch fehlen. Gibt {jahr: bestand}."""
+    roh = requests.get(AKTUELLES_URL, headers=HEADERS, timeout=60)
+    roh.raise_for_status()
+    text = roh.text
+    bestand = {}
+    # Muster: "Basis von 6'369 Wohnungen ... 1. Juni 2026"
+    # METHODIK: Die "Basis von N Wohnungen" ist der GWS-Bestand am Ende des
+    # VORJAHRES der Zaehlung. Die Meldung nennt das Zaehljahr (2026), der
+    # Bestand 6369 gehoert aber zum GWS-Bezugsjahr 2025. Wir legen ihn unter
+    # (Zaehljahr - 1) ab, passend zur Ziffer-Berechnung mit Vorjahresbestand.
+    for m in re.finditer(
+            r"[Bb]asis von\s+([\d'\u2019]+)\s+Wohnungen.{0,40}?"
+            r"1\.\s*Juni\s*(20\d{2})", text, re.DOTALL):
+        roh_zahl = m.group(1).replace("'", "").replace("\u2019", "")
+        gws_bezugsjahr = str(int(m.group(2)) - 1)
+        try:
+            wert = int(roh_zahl)
+            if 1000 <= wert <= 100000:
+                bestand[gws_bezugsjahr] = wert
+        except ValueError:
+            continue
+    return bestand
+
+
 def _leerwohnungsziffer(region_begriff: str = "neuhausen am rheinfall",
                         bfs_nr: str = "2937") -> tuple:
     """Holt die Leerwohnungsdaten aus der offiziellen SDMX-API der
@@ -1503,38 +1555,72 @@ def _leerwohnungsziffer(region_begriff: str = "neuhausen am rheinfall",
     if len(anzahl) < 3:
         raise RuntimeError(f"zu wenige Leerwohnungs-Werte aus SDMX ({len(anzahl)})")
 
+    # Neueste Jahre, die im BFS-Dataflow noch fehlen (Publikationsverzug),
+    # aus der amtlichen Gemeinde-Meldung ergaenzen. Gleiche Quelle wie der
+    # Bestand; ueberschreibt keine vorhandenen API-Werte.
+    try:
+        anzahl_gem = _anzahl_aus_gemeinde()
+        for jahr, wert in anzahl_gem.items():
+            anzahl.setdefault(jahr, wert)
+    except Exception:
+        pass
+
     # 2) Aufschluesselung nach Zimmerzahl fuer das neueste Jahr aus denselben
     #    bereits geladenen Zeilen (Typ Total, einzelne Zimmerkategorien).
     neuestes = max(anzahl)
     zimmer_namen = {"1": "1 Zimmer", "2": "2 Zimmer", "3": "3 Zimmer",
                     "4": "4 Zimmer", "5": "5 Zimmer", "6": "6+ Zimmer"}
-    verteilung = {}
+    zimmer_reihenfolge = ["1 Zimmer", "2 Zimmer", "3 Zimmer",
+                          "4 Zimmer", "5 Zimmer", "6+ Zimmer"]
+    verteilung = {}          # neuestes Jahr: {name: anzahl}
+    verteilung_jahre = {}    # alle Jahre: {name: {jahr: anzahl}}
     for z in zeilen:
         jahr = (z.get("TIME_PERIOD") or "").strip()
         zc = (z.get("WOHN_ANZAHL") or "").strip()
         typ = (z.get("LEERWOHN_TYP") or "_T").strip()
         wert = (z.get("OBS_VALUE") or "").strip()
         # Nur Typ-Total-Zeilen, sonst zaehlen Typ-Unterkategorien mit
-        if jahr == neuestes and typ in ("_T", "", "T") \
-                and zc in zimmer_namen and wert:
+        if typ in ("_T", "", "T") and zc in zimmer_namen and wert:
             try:
-                verteilung[zimmer_namen[zc]] = int(round(float(wert)))
+                v = int(round(float(wert)))
             except ValueError:
                 continue
+            name = zimmer_namen[zc]
+            verteilung_jahre.setdefault(name, {})[jahr] = v
+            if jahr == neuestes:
+                verteilung[name] = v
+    # Aufsteigend nach Zimmerzahl ordnen (1,2,3,4,5,6+)
+    verteilung = {n: verteilung[n] for n in zimmer_reihenfolge
+                  if n in verteilung}
 
     # 3) Gesamtbestand fuer die Prozent-Ziffer (Quelle wird automatisch gesucht)
     bestand, bestand_df = _leerwohnung_bestand(bfs_nr)
+    # Neueste Jahre (GWS oft ein Jahr im Rueckstand) aus der amtlichen
+    # Gemeinde-Meldung ergaenzen, ohne vorhandene GWS-Werte zu ueberschreiben.
+    try:
+        best_gem = _bestand_aus_gemeinde()
+        for jahr, wert in best_gem.items():
+            bestand.setdefault(jahr, wert)
+    except Exception:
+        pass
 
-    # 4) Reihe bauen: Ziffer in % wenn Bestand vorhanden, sonst Anzahl
+    # 4) Reihe bauen: Ziffer in % wenn Bestand vorhanden, sonst Anzahl.
+    # METHODIK (BFS): Die Leerwohnungsziffer der Zaehlung vom 1. Juni eines
+    # Jahres wird mit dem Wohnungsbestand am ENDE DES VORJAHRES berechnet
+    # (GWS-Bestand des Vorjahres). Das BFS nennt die Zaehlung 2025 daher
+    # ausdruecklich "2025, Basis GWS 2024". Der Bestand ist im dict unter
+    # seinem GWS-Bezugsjahr abgelegt; fuer die Zaehlung 'jahr' brauchen wir
+    # also bestand[jahr-1].
     anzahl_reihe = sorted((j, v) for j, v in anzahl.items())
     ist_ziffer = bool(bestand)
     if ist_ziffer:
         reihe = []
         for jahr, leer in anzahl_reihe:
-            best = bestand.get(jahr)
+            vorjahr = str(int(jahr) - 1)
+            best = bestand.get(vorjahr)
             if best and best > 0:
                 reihe.append((jahr, round(leer / best * 100, 2)))
-        # Falls fuer zu wenige Jahre ein Bestand vorliegt, auf Anzahl zurueck
+        # Falls fuer zu wenige Jahre ein Vorjahresbestand vorliegt, auf Anzahl
         if len(reihe) < 3:
             ist_ziffer = False
             reihe = anzahl_reihe
@@ -1546,6 +1632,7 @@ def _leerwohnungsziffer(region_begriff: str = "neuhausen am rheinfall",
         "bestand_reihe": sorted(bestand.items()),
         "bestand_quelle": bestand_df,
         "zimmer_verteilung": verteilung,
+        "zimmer_verteilung_jahre": verteilung_jahre,
         "neuestes_jahr": neuestes,
         "ist_ziffer": ist_ziffer,
     }
@@ -1605,20 +1692,33 @@ def _sdmx_struktur_dims_codelisten(agency_dataflow: str, version: str = "") -> t
 
 def _sdmx_gemeinde_schluessel(dims, codelisten, bfs_nr="2937",
                               mess_dim_wert=None):
-    """Baut den SDMX-Datenschluessel: an der Gemeindedimension die BFS-Nr,
-    an FREQ ein 'A', sonst leer. Gibt (schluessel, geo_dim_id) zurueck."""
+    """Baut den SDMX-Datenschluessel: an der Gemeindedimension den Gemeinde-
+    Code, an FREQ ein 'A', sonst leer. Findet den Code flexibel: exakte
+    BFS-Nr, ein Code der die BFS-Nr enthaelt, oder ein Code dessen Name
+    'Neuhausen' nennt. Gibt (schluessel, geo_dim_id, gemeinde_code)."""
     def norm(s):
         return re.sub(r"\s+", " ", (s or "").casefold()).strip()
     geo_dim = None
+    gemeinde_code = bfs_nr
+    # Stufe 1: Dimension, deren Codeliste Neuhausen kennt
     for dim in dims:
         codes = codelisten.get(dim["codelist"], {})
+        # exakter Code
         if bfs_nr in codes and "neuhausen" in norm(codes.get(bfs_nr, "")):
-            geo_dim = dim["id"]
+            geo_dim, gemeinde_code = dim["id"], bfs_nr
+            break
+        # Code, der die BFS-Nr enthaelt, oder Name nennt Neuhausen
+        for cid, cname in codes.items():
+            if (bfs_nr in cid and cid != bfs_nr) or "neuhausen" in norm(cname):
+                geo_dim, gemeinde_code = dim["id"], cid
+                break
+        if geo_dim:
             break
     if geo_dim is None:
         for dim in dims:
             if any(t in norm(dim["id"]) for t in
-                   ("geo", "municip", "commune", "city", "region", "gde")):
+                   ("geo", "municip", "commune", "city", "region", "gde",
+                    "raum", "gemeinde", "kt_gde", "space", "spatial")):
                 geo_dim = dim["id"]
                 break
     if geo_dim is None:
@@ -1626,12 +1726,12 @@ def _sdmx_gemeinde_schluessel(dims, codelisten, bfs_nr="2937",
     teile = []
     for dim in dims:
         if dim["id"] == geo_dim:
-            teile.append(bfs_nr)
+            teile.append(gemeinde_code)
         elif "freq" in norm(dim["id"]):
             teile.append("A")
         else:
             teile.append("")
-    return ".".join(teile), geo_dim
+    return ".".join(teile), geo_dim, gemeinde_code
 
 
 def _netto_mietzins(bfs_nr="2937"):
@@ -1641,7 +1741,7 @@ def _netto_mietzins(bfs_nr="2937"):
     Selbstvalidierend: nur plausible Werte (1-100 CHF/m2), Unterdrueckungen
     ('X', '...', leere) werden uebersprungen, nie geschaetzt."""
     dims, codelisten = _sdmx_struktur_dims_codelisten(SDMX_CITYSTAT)
-    schluessel, geo = _sdmx_gemeinde_schluessel(dims, codelisten, bfs_nr)
+    schluessel, geo, gcode = _sdmx_gemeinde_schluessel(dims, codelisten, bfs_nr)
     url = (f"{SDMX_BASIS}/{SDMX_CITYSTAT}/{schluessel}"
            f"?dimensionAtObservation=AllDimensions&format=csvfile"
            f"&startPeriod=2016&endPeriod=2024")
@@ -1689,8 +1789,16 @@ def diagnose_mietzins():
     try:
         dims, codelisten = _sdmx_struktur_dims_codelisten(SDMX_CITYSTAT)
         print(f"Dimensionen: {[d['id'] for d in dims]}")
-        schluessel, geo = _sdmx_gemeinde_schluessel(dims, codelisten)
-        print(f"Gemeindedimension: {geo}")
+        for d in dims:
+            codes = codelisten.get(d["codelist"], {})
+            treffer = {c: n for c, n in codes.items()
+                       if "neuhausen" in (n or "").casefold() or "2937" in c}
+            info = f"{len(codes)} Codes"
+            if treffer:
+                info += f", Neuhausen: {list(treffer.items())[:2]}"
+            print(f"  Dim {d['id']} (CL {d['codelist']}): {info}")
+        schluessel, geo, gcode = _sdmx_gemeinde_schluessel(dims, codelisten)
+        print(f"\nGemeindedimension: {geo}, Code: {gcode}")
         print(f"Schluessel: {schluessel}")
         reihe, url, guete = _netto_mietzins()
         print(f"\nURL: {url}")
@@ -2047,15 +2155,18 @@ def baue_kennzahlen() -> None:
                 print(f"  Kennzahlen: Wohnungsbestand {bestand[0][0]}\u2013"
                       f"{bestand[-1][0]} (aktuell {bestand[-1][1]})")
 
-            # Leer stehende Wohnungen nach Zimmerzahl (Verteilung)
+            # Leer stehende Wohnungen nach Zimmerzahl (aufsteigend geordnet)
             verteilung = extra.get("zimmer_verteilung") or {}
             if verteilung and sum(verteilung.values()) > 0:
                 reihe_v = [(k, v) for k, v in verteilung.items()]
+                # Mehrjahresdaten fuer den Zeitverlauf je Zimmerzahl in der
+                # Detailansicht mitgeben.
+                vj = extra.get("zimmer_verteilung_jahre") or {}
                 karte("Wohnen", "Leerstand nach Wohnungsgrösse", "Wohnungen",
                       reihe_v, "BFS, Leerwohnungszählung (data.stats.swiss)",
                       url, hinweis=f"Leer stehende Wohnungen nach Zimmerzahl "
                                    f"({extra.get('neuestes_jahr','')})",
-                      extra={"typ": "verteilung"})
+                      extra={"typ": "verteilung", "verlauf_je_kategorie": vj})
                 print(f"  Kennzahlen: Leerstand nach Zimmerzahl "
                       f"({len(verteilung)} Kategorien)")
     except Exception as e:
