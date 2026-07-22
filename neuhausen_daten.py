@@ -1624,9 +1624,119 @@ def diagnose_stattab():
     print("\n===== Ende Sonden =====")
 
 
+def vergleichsgemeinden(min_ew=9500, max_ew=18000):
+    """Ermittelt alle Schweizer Gemeinden mit einer staendigen Wohnbevoelkerung
+    im angegebenen Bereich (Standard 9500-18000), aus demselben BFS-Wuerfel
+    wie die Neuhausen-Bevoelkerung. Gibt eine sortierte, amtliche Liste aus.
+    Aufruf: python neuhausen_daten.py --vergleichsgemeinden"""
+    print(f"===== Vergleichsgemeinden {min_ew}-{max_ew} Einwohner =====")
+    try:
+        basis = f"{STATTAB_BASIS}/px-x-0102020000_201/px-x-0102020000_201.px"
+        meta = requests.get(basis, headers=HEADERS, timeout=60).json()
+    except Exception as e:
+        print(f"FEHLER beim Laden der Wuerfel-Struktur: {e}")
+        return
+
+    # Dimensionen bestimmen
+    reg_var = sak_var = ge_var = dk_var = zeit_var = None
+    for var in meta["variables"]:
+        code = var["code"]
+        if "gemeinde" in code.lower():
+            reg_var = var
+        elif code == "Staatsangehörigkeit (Kategorie)":
+            sak_var = var
+        elif code == "Geschlecht":
+            ge_var = var
+        elif code == "Demografische Komponente":
+            dk_var = var
+        if var.get("time"):
+            zeit_var = var
+
+    def code_fuer(var, begriff):
+        for w, t in zip(var["values"], var["valueTexts"]):
+            if begriff in t.lower():
+                return w
+        return None
+
+    tot_sak = code_fuer(sak_var, "total")
+    tot_ge = code_fuer(ge_var, "total")
+    bestand = code_fuer(dk_var, "bestand am 31. dezember")
+    jahr_code = zeit_var["values"][-1]
+    jahr_text = zeit_var["valueTexts"][-1]
+
+    # Nur echte Gemeinden (Code beginnt mit "......" im valueText) auswaehlen.
+    # Die Wuerfel-Struktur nutzt Praefixe: "......XXXX Gemeindename".
+    gemeinde_codes = []
+    gemeinde_namen = {}
+    for w, t in zip(reg_var["values"], reg_var["valueTexts"]):
+        if t.strip().startswith("......"):
+            name = t.strip().lstrip(".").strip()
+            # Fuehrende BFS-Nummer abtrennen (z. B. "2937 Neuhausen...")
+            m = re.match(r"^(\d+)\s+(.*)$", name)
+            if m:
+                gemeinde_namen[w] = (m.group(1), m.group(2))
+            else:
+                gemeinde_namen[w] = ("", name)
+            gemeinde_codes.append(w)
+
+    print(f"Jahr: {jahr_text}, Gemeinden gesamt: {len(gemeinde_codes)}")
+    print(f"Frage Bevoelkerung ab (das dauert einen Moment)...\n")
+
+    # In Bloecken abfragen (alle Gemeinden auf einmal via filter "item").
+    ergebnisse = []
+    BLOCK = 300
+    for i in range(0, len(gemeinde_codes), BLOCK):
+        teil = gemeinde_codes[i:i + BLOCK]
+        q = [
+            {"code": reg_var["code"], "selection": {"filter": "item", "values": teil}},
+            {"code": "Staatsangehörigkeit (Kategorie)",
+             "selection": {"filter": "item", "values": [tot_sak]}},
+            {"code": "Geschlecht", "selection": {"filter": "item", "values": [tot_ge]}},
+            {"code": "Demografische Komponente",
+             "selection": {"filter": "item", "values": [bestand]}},
+            {"code": zeit_var["code"], "selection": {"filter": "item", "values": [jahr_code]}},
+        ]
+        try:
+            r = requests.post(basis, json={"query": q,
+                              "response": {"format": "json-stat2"}},
+                              headers=HEADERS, timeout=120)
+            r.raise_for_status()
+            js = r.json()
+            werte = js.get("value", [])
+            # Reihenfolge der Region-Dimension entspricht der Abfrage-Reihenfolge
+            dim = js["dimension"][reg_var["code"]]["category"]["index"]
+            # index: code -> position
+            pos_zu_code = {p: c for c, p in dim.items()}
+            for pos in range(len(werte)):
+                w = werte[pos]
+                if w is None:
+                    continue
+                code = pos_zu_code.get(pos)
+                if code in gemeinde_namen:
+                    nr, name = gemeinde_namen[code]
+                    if min_ew <= w <= max_ew:
+                        ergebnisse.append((w, name, nr))
+        except Exception as e:
+            print(f"  Block {i}-{i+len(teil)}: FEHLER {e}")
+
+    ergebnisse.sort(reverse=True)
+    print(f"===== {len(ergebnisse)} Gemeinden im Bereich "
+          f"{min_ew}-{max_ew} (Stand {jahr_text}) =====\n")
+    print(f"{'Einwohner':>10}  {'BFS-Nr':>7}  Gemeinde")
+    print("-" * 50)
+    for ew, name, nr in ergebnisse:
+        marker = "  <-- Neuhausen" if "neuhausen am rheinfall" in name.lower() else ""
+        print(f"{ew:>10}  {nr:>7}  {name}{marker}")
+    print(f"\n===== Ende Liste ({len(ergebnisse)} Gemeinden) =====")
+
+
 def main():
     if "--diagnose-stattab" in sys.argv:
         diagnose_stattab()
+        return
+
+    if "--vergleichsgemeinden" in sys.argv:
+        vergleichsgemeinden()
         return
 
     vorstoesse = []
