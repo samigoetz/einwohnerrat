@@ -16,6 +16,7 @@ def _zahl(text):
         return None
     t = text.strip().replace("\u2019", "").replace("'", "").replace("\u2013", "-")
     t = t.replace("\u2212", "-")  # Minuszeichen
+    t = t.replace("\u00a0", "").replace("\u202f", "").replace("\u2009", "")  # schmale Leerzeichen
     # Klammern als negativ (kommt in manchen Rechnungen vor)
     neg = False
     if t.startswith("(") and t.endswith(")"):
@@ -32,32 +33,107 @@ def _zahl(text):
     return -v if neg else v
 
 
-# Zahl-Muster im Fliesstext: 1'234'567 oder -1'234 oder 1'234.56
-ZAHL = r"-?\d{1,3}(?:['\u2019]\d{3})*(?:\.\d+)?|-?\d+(?:\.\d+)?"
+# ---------------------------------------------------------------------------
+# Wortkoordinaten-basierte Zeilenrekonstruktion.
+# pdfplumber liefert je Wort Text und x-Position. Zahlenfragmente, die eng
+# beieinanderstehen (kleine Luecke), gehoeren zu EINER Zahl; grosse Luecken
+# trennen Spalten. So zerbrechen grosse Betraege nicht mehr.
+# ---------------------------------------------------------------------------
+
+def zeilen_aus_woertern(seite):
+    """Gibt Liste von Zeilen zurueck; jede Zeile ist (text, [(zahl, x0), ...]).
+    Zahlen werden aus benachbarten Ziffern-Fragmenten zusammengesetzt."""
+    woerter = seite.extract_words(x_tolerance=1.5, y_tolerance=3,
+                                  keep_blank_chars=False)
+    # nach Zeile (oben-Koordinate, gerundet) gruppieren
+    zeilen_map = {}
+    for w in woerter:
+        schluessel = round(w["top"] / 3)
+        zeilen_map.setdefault(schluessel, []).append(w)
+
+    ergebnis = []
+    for schluessel in sorted(zeilen_map):
+        ws = sorted(zeilen_map[schluessel], key=lambda w: w["x0"])
+        text = " ".join(w["text"] for w in ws)
+        # Ziffern-Fragmente zu Zahlen zusammensetzen
+        zahlen = _zahlen_aus_woertern(ws)
+        ergebnis.append((text, zahlen))
+    return ergebnis
+
+
+def _ist_ziffernfragment(t):
+    """Sieht aus wie ein (Teil-)Betrag: nur Ziffern, evtl. Vorzeichen/Punkt/
+    Klammer/Prozent."""
+    tt = t.strip().strip("()%")
+    tt = tt.replace("\u2019", "").replace("'", "")
+    tt = tt.replace("\u00a0", "").replace("\u202f", "").replace("\u2009", "")
+    return bool(re.match(r"^-?\d+(\.\d+)?$", tt)) if tt else False
+
+
+def _zahlen_aus_woertern(ws):
+    """Aus den Woertern einer Zeile die Betraege rekonstruieren.
+    Fragmente, deren Luecke klein ist (< breiten-basierter Schwelle),
+    werden verkettet; grosse Luecken trennen Zahlen."""
+    zahlen = []
+    aktuell = None   # {"teile": [...], "x0": .., "x1": ..}
+    for w in ws:
+        t = w["text"]
+        if _ist_ziffernfragment(t):
+            if aktuell is None:
+                aktuell = {"teile": [t], "x0": w["x0"], "x1": w["x1"]}
+            else:
+                luecke = w["x0"] - aktuell["x1"]
+                # Zeichenbreite grob = Breite/Zeichen des bisherigen Blocks
+                # Kleine Luecke (< ~4 pt) => selbe Zahl (Tausendertrennung),
+                # sonst neue Zahl.
+                if luecke < 4.0:
+                    aktuell["teile"].append(t)
+                    aktuell["x1"] = w["x1"]
+                else:
+                    zahlen.append(_verkette(aktuell))
+                    aktuell = {"teile": [t], "x0": w["x0"], "x1": w["x1"]}
+        else:
+            if aktuell is not None:
+                zahlen.append(_verkette(aktuell))
+                aktuell = None
+    if aktuell is not None:
+        zahlen.append(_verkette(aktuell))
+    return [z for z in zahlen if z is not None]
+
+
+def _verkette(block):
+    """Fragmentteile zu einer Zahl zusammensetzen: '90' '229' '384' -> 90229384.
+    Vorzeichen nur am Anfang, Dezimalpunkt bleibt erhalten."""
+    roh = "".join(block["teile"])
+    return _zahl(roh)
+
+
+# Zahl-Muster: nur ECHTE Tausendertrenner (Hochkomma, schmale Leerzeichen),
+# NIE das normale Leerzeichen (das trennt separate Zahlen).
+_TRENNER = "'\u2019\u00a0\u202f\u2009"
+ZAHL = (r"-?\d{1,3}(?:[" + _TRENNER + r"]\d{3})+(?:\.\d+)?"
+        r"|-?\d+(?:\.\d+)?")
 
 
 def _zahlen_der_zeile(zeile):
-    """Alle Zahlen einer Textzeile in Reihenfolge."""
+    """Alle Zahlen einer reinen Textzeile (Rueckfallebene ohne Koordinaten)."""
     return [_zahl(m) for m in re.findall(ZAHL, zeile)]
 
 
-def extrahiere_uebersicht(text):
+def extrahiere_uebersicht(zeilen):
     """Seite 'Uebersicht': Erfolgsrechnung-Eckwerte, Steuerfuesse.
-    Rueckgabe je Kennzahl: (rechnung, budget, vorjahr) soweit vorhanden."""
+    `zeilen` ist Liste von (text, [zahlen]) aus zeilen_aus_woertern."""
     d = {}
-    for zeile in text.splitlines():
-        z = zeile.strip()
+    for text, zahlen in zeilen:
+        z = text.strip()
         for schluessel, muster in (
             ("gesamtaufwand", r"^Gesamtaufwand\b"),
             ("gesamtertrag", r"^Gesamtertrag\b"),
             ("ergebnis_er", r"^Ertrags-.*Aufwand.berschuss"),
             ("operatives_ergebnis", r"^Operatives Ergebnis\b"),
         ):
-            if re.search(muster, z):
-                zahlen = _zahlen_der_zeile(z)
-                if zahlen:
-                    d[schluessel] = zahlen
-        # Steuerfuesse: "Steuerfuss natuerliche Personen 93% 93% 96%"
+            if re.search(muster, z) and zahlen:
+                d[schluessel] = zahlen
         if re.search(r"Steuerfuss nat.rliche Personen", z):
             proz = re.findall(r"(\d+)\s*%", z)
             if proz:
@@ -69,7 +145,7 @@ def extrahiere_uebersicht(text):
     return d
 
 
-def extrahiere_a8_kennzahlen(text):
+def extrahiere_a8_kennzahlen(zeilen):
     """Seite A8 Finanzkennzahlen: je Kennzahl (rechnung, vorjahr) in %."""
     kennzahlen = {}
     muster = {
@@ -81,38 +157,43 @@ def extrahiere_a8_kennzahlen(text):
         "bruttoverschuldungsanteil": r"Bruttoverschuldungsanteil",
         "investitionsanteil": r"Investitionsanteil",
     }
-    for zeile in text.splitlines():
-        z = zeile.strip()
+    for text, zahlen in zeilen:
+        z = text.strip()
         for schluessel, m in muster.items():
             if re.match(m, z):
-                # erste zwei Prozentwerte der Zeile = Rechnung, Vorjahr
                 proz = re.findall(r"(-?\d+(?:\.\d+)?)\s*%", z)
                 if len(proz) >= 2:
                     kennzahlen[schluessel] = [float(proz[0]), float(proz[1])]
-        # Nettoschuld pro Einwohner (Franken, kann negativ = Vermoegen)
         if re.match(r"Nettoschuld I pro Einwohner", z):
-            zahlen = _zahlen_der_zeile(z)
             if len(zahlen) >= 2:
                 kennzahlen["nettoschuld_pro_kopf"] = zahlen[:2]
     return kennzahlen
 
 
-def extrahiere_bilanz_summen(text):
+def extrahiere_bilanz_summen(zeilen):
     """Bilanz-Hauptsummen fuer die Kontrollprobe Aktiven = Passiven."""
     d = {}
-    for zeile in text.splitlines():
-        z = zeile.strip()
-        # Ordnungsziffer am Zeilenanfang entfernen, damit nicht "1" (aus
-        # "1 Aktiven") faelschlich als Betrag gelesen wird.
-        for schluessel, kopf in (("aktiven", r"^1 Aktiven\b"),
-                                 ("passiven", r"^2 Passiven\b"),
-                                 ("eigenkapital", r"^29 Eigenkapital\b")):
-            if re.match(kopf, z):
-                rest = re.sub(kopf, "", z).strip()
-                zahlen = _zahlen_der_zeile(rest)
-                if zahlen:
-                    d[schluessel] = zahlen[0]
+    for text, zahlen in zeilen:
+        z = text.strip()
+        # Erste Zahl der Zeile ist der Bilanzwert. Ordnungsziffer (1, 2, 29)
+        # ist KEINE eigene Zahl in den Koordinaten, weil sie mit Abstand vor
+        # dem Betrag steht; zur Sicherheit filtern wir kleine Leitziffern.
+        if re.match(r"^1 Aktiven\b", z) and zahlen:
+            d["aktiven"] = _erster_betrag(zahlen)
+        if re.match(r"^2 Passiven\b", z) and zahlen:
+            d["passiven"] = _erster_betrag(zahlen)
+        if re.match(r"^29 Eigenkapital\b", z) and zahlen:
+            d["eigenkapital"] = _erster_betrag(zahlen)
     return d
+
+
+def _erster_betrag(zahlen):
+    """Erste 'echte' Zahl (> 999 oder < -999), um Leitziffern wie 1/2/29
+    zu ueberspringen, falls sie doch als Zahl auftauchen."""
+    for z in zahlen:
+        if abs(z) > 999:
+            return z
+    return zahlen[0] if zahlen else None
 
 
 def pruefe(uebersicht, bilanz):
@@ -138,21 +219,27 @@ def pruefe(uebersicht, bilanz):
     return proben
 
 
+def _alle_zeilen(pdf):
+    """Alle Seiten -> flache Liste von (text, [zahlen]) mit Koordinaten."""
+    zeilen = []
+    for seite in pdf.pages:
+        zeilen.extend(zeilen_aus_woertern(seite))
+    return zeilen
+
+
 def verarbeite(pfad):
     import pdfplumber
-    seiten_text = []
     with pdfplumber.open(pfad) as pdf:
-        for seite in pdf.pages:
-            seiten_text.append(seite.extract_text() or "")
-    volltext = "\n".join(seiten_text)
+        zeilen = _alle_zeilen(pdf)
+        n_seiten = len(pdf.pages)
 
-    uebersicht = extrahiere_uebersicht(volltext)
-    a8 = extrahiere_a8_kennzahlen(volltext)
-    bilanz = extrahiere_bilanz_summen(volltext)
+    uebersicht = extrahiere_uebersicht(zeilen)
+    a8 = extrahiere_a8_kennzahlen(zeilen)
+    bilanz = extrahiere_bilanz_summen(zeilen)
     proben = pruefe(uebersicht, bilanz)
 
     return {
-        "seiten": len(seiten_text),
+        "seiten": n_seiten,
         "uebersicht": uebersicht,
         "a8_kennzahlen": a8,
         "bilanz_summen": bilanz,
@@ -177,20 +264,18 @@ def _lade_pdf(url):
         return r.read()
 
 
-def _text_aus_pdf_bytes(roh):
+def _zeilen_aus_bytes(roh):
     import pdfplumber
     import io
-    seiten = []
     with pdfplumber.open(io.BytesIO(roh)) as pdf:
-        for seite in pdf.pages:
-            seiten.append(seite.extract_text() or "")
-    return "\n".join(seiten), len(seiten)
+        zeilen = _alle_zeilen(pdf)
+        n = len(pdf.pages)
+    return zeilen, n
 
 
 def diagnose():
     """Laedt die echten PDFs 2024 und 2025, strukturiert sie und zeigt,
     ob die Kontrollsummen aufgehen. Aendert nichts."""
-    import json
     for jahr, url in JAHRESRECHNUNGEN.items():
         print(f"\n{'=' * 60}")
         print(f"JAHRESRECHNUNG {jahr}")
@@ -198,15 +283,15 @@ def diagnose():
         try:
             roh = _lade_pdf(url)
             print(f"  PDF geladen: {len(roh):,} Bytes")
-            volltext, n_seiten = _text_aus_pdf_bytes(roh)
-            print(f"  Seiten: {n_seiten}, Textlaenge: {len(volltext):,} Zeichen")
+            zeilen, n_seiten = _zeilen_aus_bytes(roh)
+            print(f"  Seiten: {n_seiten}, Zeilen: {len(zeilen)}")
         except Exception as e:
             print(f"  FEHLER beim Laden/Lesen: {e}")
             continue
 
-        ueb = extrahiere_uebersicht(volltext)
-        a8 = extrahiere_a8_kennzahlen(volltext)
-        bil = extrahiere_bilanz_summen(volltext)
+        ueb = extrahiere_uebersicht(zeilen)
+        a8 = extrahiere_a8_kennzahlen(zeilen)
+        bil = extrahiere_bilanz_summen(zeilen)
         proben = pruefe(ueb, bil)
 
         print(f"\n  --- UEBERSICHT (Rechnung/Budget/Vorjahr) ---")
@@ -223,8 +308,7 @@ def diagnose():
             print("      keine Proben moeglich (Werte fehlen)")
         for name, ok, detail in proben:
             print(f"      [{'OK ' if ok else 'FEHLER'}] {name}: {detail}")
-        a8_zahl = len(a8)
-        print(f"\n  Ergebnis {jahr}: {a8_zahl}/8 A8-Kennzahlen, "
+        print(f"\n  Ergebnis {jahr}: {len(a8)}/8 A8-Kennzahlen, "
               f"{sum(1 for _, ok, _ in proben if ok)}/{len(proben)} Proben ok")
     print(f"\n{'=' * 60}\nEnde Finanz-Diagnose\n{'=' * 60}")
 
