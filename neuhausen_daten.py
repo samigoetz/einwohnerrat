@@ -51,7 +51,7 @@ PRESSE_LEAD_MAX_PRO_LAUF = 40    # so viele fehlende Leads werden pro Lauf gehol
 PRESSE_RUECKFUELL_AB_JAHR = 2020
 KENNZAHLEN_AUSGABE = BASIS / "kennzahlen.js"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 13          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 14          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -1103,11 +1103,14 @@ def _stattab_reihe(cube: str, festlegungen: list,
     if cube not in _STATTAB_META:
         r = requests.get(basis, headers=HEADERS, timeout=60)
         if r.status_code >= 400:
-            # Manche Wuerfel akzeptieren nur die kurze Adressform
-            alt_basis = f"{STATTAB_BASIS}/{cube}.px"
-            r2 = requests.get(alt_basis, headers=HEADERS, timeout=60)
-            if r2.status_code < 400:
-                basis, r = alt_basis, r2
+            # Manche Wuerfel brauchen andere Adressformen: kurz (einstufig)
+            # oder dreistufig (Unterordner gleichen Namens).
+            for alt_basis in (f"{STATTAB_BASIS}/{cube}.px",
+                              f"{STATTAB_BASIS}/{cube}/{cube}/{cube}.px"):
+                r2 = requests.get(alt_basis, headers=HEADERS, timeout=60)
+                if r2.status_code < 400:
+                    basis, r = alt_basis, r2
+                    break
         r.raise_for_status()
         _STATTAB_META[cube] = r.json()
         _STATTAB_BASIS_OK[cube] = basis
@@ -1287,7 +1290,11 @@ def _leerwohnung_stattab(region_begriff: str) -> tuple:
     # Metadaten laden, mehrere URL-Formen probieren
     meta = None
     basis_ok = None
-    for basis in (f"{STATTAB_BASIS}/{cube}/{cube}.px",
+    # Dieser Wuerfel liegt in einem Unterordner gleichen Namens; seine API-
+    # Adresse ist deshalb DREISTUFIG (Cube-Name dreimal). Die kuerzeren
+    # Formen liefern HTTP 400, was uns lange in die Irre fuehrte.
+    for basis in (f"{STATTAB_BASIS}/{cube}/{cube}/{cube}.px",
+                  f"{STATTAB_BASIS}/{cube}/{cube}.px",
                   f"{STATTAB_BASIS}/{cube}.px"):
         try:
             r = requests.get(basis, headers=HEADERS, timeout=60)
