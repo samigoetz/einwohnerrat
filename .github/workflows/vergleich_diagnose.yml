@@ -1,0 +1,26 @@
+name: Vergleichsgemeinden
+
+# Nur manuell startbar. Ermittelt alle Schweizer Gemeinden mit 9500-18000
+# Einwohnern (staendige Wohnbevoelkerung, BFS), sortiert und mit BFS-Nummer.
+# Aendert keine Dateien.
+on:
+  workflow_dispatch:
+
+jobs:
+  vergleich:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Repository holen
+        uses: actions/checkout@v5
+
+      - name: Python einrichten
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Abhaengigkeiten installieren
+        run: pip install requests beautifulsoup4 pypdf
+
+      - name: Gemeindeliste ermitteln
+        run: python neuhausen_daten.py --vergleichsgemeinden
