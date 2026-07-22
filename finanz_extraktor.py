@@ -258,9 +258,21 @@ def verarbeite(pfad):
 
 
 JAHRESRECHNUNGEN = {
-    "2024": "https://neuhausen.ch/fileupload/Jahresrechnung 2024 genehmigte Version.pdf",
     "2025": "https://neuhausen.ch/fileupload/Jahresrechnung 2025.pdf",
+    "2024": "https://neuhausen.ch/fileupload/Jahresrechnung 2024 genehmigte Version.pdf",
+    "2023": "https://neuhausen.ch/fileupload/Jahresrechnung 2023 genehmigte Version.pdf",
+    "2022": "https://neuhausen.ch/fileupload/Jahresrechnung 2022.pdf",
+    "2021": "https://neuhausen.ch/fileupload/Jahresrechnung 2021.pdf",
+    "2020": "https://neuhausen.ch/fileupload/Jahresrechnung 2020 durch ER genehmigt zwei.pdf",
 }
+
+# Die acht A8-Kennzahlen (fuer die Vollstaendigkeitspruefung)
+A8_SCHLUESSEL = [
+    "nettoverschuldungsquotient", "selbstfinanzierungsgrad",
+    "zinsbelastungsanteil", "selbstfinanzierungsanteil",
+    "kapitaldienstanteil", "bruttoverschuldungsanteil",
+    "investitionsanteil", "nettoschuld_pro_kopf",
+]
 
 
 def _lade_pdf(url):
@@ -331,8 +343,43 @@ def diagnose():
     print(f"\n{'=' * 60}\nEnde Finanz-Diagnose\n{'=' * 60}")
 
 
+def diagnose_uebersicht():
+    """Kompakte Bilanz ueber alle Jahrgaenge: pro Jahr eine Zeile mit
+    Anzahl erkannter A8-Kennzahlen, Steuerfuss/Ergebnis vorhanden,
+    Kontrollsummen. Zeigt, ab welchem Jahr die Erfassung wie vollstaendig ist."""
+    print(f"\n{'=' * 74}")
+    print(f"{'Jahr':<6}{'A8':>5}{'Steuerf.':>10}{'Ergebnis':>10}"
+          f"{'Proben':>9}{'Bilanz-Aktiven':>18}   Status")
+    print(f"{'-' * 74}")
+    for jahr in sorted(JAHRESRECHNUNGEN, reverse=True):
+        url = JAHRESRECHNUNGEN[jahr]
+        try:
+            roh = _lade_pdf(url)
+            zeilen, _ = _zeilen_aus_bytes(roh)
+            ueb = extrahiere_uebersicht(zeilen)
+            a8 = extrahiere_a8_kennzahlen(zeilen)
+            bil = extrahiere_bilanz_summen(zeilen)
+            proben = pruefe(ueb, bil)
+            n_a8 = sum(1 for s in A8_SCHLUESSEL if s in a8)
+            steuer = "ja" if "steuerfuss_np" in ueb else "-"
+            ergebnis = "ja" if "ergebnis_er" in ueb else "-"
+            n_ok = sum(1 for _, ok, _ in proben if ok)
+            aktiven = bil.get("aktiven", "-")
+            status = "vollstaendig" if (n_a8 == 8 and n_ok == 2) else \
+                     ("teilweise" if n_a8 > 0 else "keine A8")
+            print(f"{jahr:<6}{n_a8:>3}/8{steuer:>10}{ergebnis:>10}"
+                  f"{n_ok:>6}/2{str(aktiven):>18}   {status}")
+        except Exception as e:
+            print(f"{jahr:<6}{'FEHLER':>5}   {str(e)[:40]}")
+    print(f"{'=' * 74}")
+    print("Legende: A8 = erkannte Finanzkennzahlen (von 8), "
+          "Proben = bestandene Kontrollsummen (von 2)")
+
+
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "--diagnose":
+    if len(sys.argv) > 1 and sys.argv[1] == "--uebersicht":
+        diagnose_uebersicht()
+    elif len(sys.argv) > 1 and sys.argv[1] == "--diagnose":
         diagnose()
     else:
         ergebnis = verarbeite(sys.argv[1])
