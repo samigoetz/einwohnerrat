@@ -267,6 +267,42 @@
   .kz-wert { font-size: 32px; font-weight: 800; color: var(--rot); line-height: 1; }
   .kz-wert small { font-size: 15px; font-weight: 700; color: var(--schwarz); margin-left: 3px; }
   .kz-delta { font-size: 12px; font-weight: 600; color: var(--grau); margin-top: 5px; }
+  .kz-karte { border: 2px solid var(--schwarz); padding: 14px 16px 12px; cursor: pointer; transition: background 0.1s ease; }
+  .kz-karte:hover { background: #FAFAF8; }
+  .kz-karte.kz-nichtklickbar { cursor: default; }
+  .kz-karte.kz-nichtklickbar:hover { background: none; }
+  .kz-mehr { font-size: 10.5px; font-weight: 700; color: var(--rot); margin-top: 9px; text-transform: uppercase; letter-spacing: 0.05em; }
+
+  .kz-overlay {
+    position: fixed; inset: 0; z-index: 100;
+    background: rgba(29, 29, 27, 0.72);
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+  }
+  .kz-dialog {
+    background: var(--weiss); max-width: 760px; width: 100%;
+    max-height: 90vh; overflow-y: auto; border: 3px solid var(--schwarz);
+    padding: 24px 26px 26px;
+  }
+  .kz-dialog-kopf { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 4px; }
+  .kz-dialog-titel { font-size: 20px; font-weight: 800; line-height: 1.15; }
+  .kz-dialog-zu {
+    border: 2px solid var(--schwarz); background: var(--weiss);
+    font-size: 20px; font-weight: 800; line-height: 1; cursor: pointer;
+    padding: 4px 11px 6px; flex: 0 0 auto;
+  }
+  .kz-dialog-zu:hover { background: var(--rot); color: var(--weiss); border-color: var(--rot); }
+  .kz-dialog-unter { font-size: 12.5px; color: var(--grau); margin-bottom: 18px; }
+  .kz-graph { width: 100%; }
+  .kz-graph svg { display: block; width: 100%; height: auto; }
+  .kz-tabelle { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 13px; }
+  .kz-tabelle th, .kz-tabelle td { text-align: right; padding: 5px 10px; border-bottom: 1px solid var(--linie); font-variant-numeric: tabular-nums; }
+  .kz-tabelle th:first-child, .kz-tabelle td:first-child { text-align: left; }
+  .kz-tabelle th { font-weight: 800; text-transform: uppercase; font-size: 11px; letter-spacing: 0.04em; }
+  .kz-tabelle tr:last-child td { border-bottom: none; }
+  .kz-tabelle .hoch { color: var(--rot); font-weight: 700; }
+  .kz-dialog-quelle { font-size: 11px; color: var(--grau); margin-top: 16px; line-height: 1.5; }
+  .kz-dialog-quelle a { color: var(--rot); font-weight: 600; text-decoration: none; }
   .kz-spark { margin-top: 10px; }
   .kz-spark svg { display: block; width: 100%; height: 40px; }
   .kz-vgl { margin-top: 4px; }
@@ -1204,6 +1240,167 @@
     svg.appendChild(punkt);
     return svg;
   }
+  function kzGrossgraph(reihe, einheit) {
+    // Voll beschriftete Liniengrafik ueber ALLE Jahre, mit Achsen,
+    // Werteskala, Jahresbeschriftung und Punkten je Jahr.
+    var ns = "http://www.w3.org/2000/svg";
+    var B = 720, H = 340;
+    var links = 58, rechts = 16, oben = 18, unten = 42;
+    var iB = B - links - rechts, iH = H - oben - unten;
+    var werte = reihe.map(function (p) { return p[1]; });
+    var min = Math.min.apply(null, werte), max = Math.max.apply(null, werte);
+    if (min === max) { min -= 1; max += 1; }
+    var spanne = max - min;
+    // etwas Luft oben/unten
+    min -= spanne * 0.08; max += spanne * 0.08; spanne = max - min;
+
+    function px(i) {
+      return links + (reihe.length > 1 ? i / (reihe.length - 1) * iB : iB / 2);
+    }
+    function py(w) { return oben + iH - (w - min) / spanne * iH; }
+
+    var svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", "0 0 " + B + " " + H);
+    svg.setAttribute("role", "img");
+
+    // Horizontale Hilfslinien + Y-Beschriftung (5 Stufen)
+    for (var s = 0; s <= 4; s++) {
+      var wv = min + spanne * s / 4;
+      var y = py(wv);
+      var linie = document.createElementNS(ns, "line");
+      linie.setAttribute("x1", links); linie.setAttribute("x2", B - rechts);
+      linie.setAttribute("y1", y.toFixed(1)); linie.setAttribute("y2", y.toFixed(1));
+      linie.setAttribute("stroke", "#E5E5E2"); linie.setAttribute("stroke-width", "1");
+      svg.appendChild(linie);
+      var yl = document.createElementNS(ns, "text");
+      yl.setAttribute("x", links - 8); yl.setAttribute("y", (y + 4).toFixed(1));
+      yl.setAttribute("text-anchor", "end");
+      yl.setAttribute("font-size", "12"); yl.setAttribute("fill", "#6E6E6E");
+      yl.textContent = kzZahl(Math.round(wv * 10) / 10) + (einheit === "%" ? "%" : "");
+      svg.appendChild(yl);
+    }
+
+    // X-Beschriftung: erstes, letztes und einige Zwischenjahre
+    var schritt = Math.max(1, Math.ceil(reihe.length / 8));
+    for (var i = 0; i < reihe.length; i++) {
+      if (i % schritt !== 0 && i !== reihe.length - 1) continue;
+      var xt = document.createElementNS(ns, "text");
+      xt.setAttribute("x", px(i).toFixed(1)); xt.setAttribute("y", H - unten + 20);
+      xt.setAttribute("text-anchor", "middle");
+      xt.setAttribute("font-size", "12"); xt.setAttribute("fill", "#6E6E6E");
+      xt.textContent = reihe[i][0];
+      svg.appendChild(xt);
+    }
+
+    // Linie
+    var pfad = reihe.map(function (p, i) {
+      return px(i).toFixed(1) + "," + py(p[1]).toFixed(1);
+    }).join(" ");
+    var poly = document.createElementNS(ns, "polyline");
+    poly.setAttribute("points", pfad);
+    poly.setAttribute("fill", "none"); poly.setAttribute("stroke", "#E2001A");
+    poly.setAttribute("stroke-width", "2.5");
+    svg.appendChild(poly);
+
+    // Punkte mit Titel (Jahr + Wert beim Draufzeigen)
+    reihe.forEach(function (p, i) {
+      var c = document.createElementNS(ns, "circle");
+      c.setAttribute("cx", px(i).toFixed(1)); c.setAttribute("cy", py(p[1]).toFixed(1));
+      c.setAttribute("r", reihe.length > 25 ? "2.2" : "3.2");
+      c.setAttribute("fill", "#E2001A");
+      var t = document.createElementNS(ns, "title");
+      t.textContent = p[0] + ": " + kzZahl(p[1]) + (einheit === "%" ? "%" : "");
+      c.appendChild(t);
+      svg.appendChild(c);
+    });
+    return svg;
+  }
+
+  function kzOeffneDetail(k) {
+    var reihe = k.reihe || [];
+    if (reihe.length < 2) return;
+    var letzte = reihe[reihe.length - 1];
+    var werte = reihe.map(function (p) { return p[1]; });
+    var maxW = Math.max.apply(null, werte), minW = Math.min.apply(null, werte);
+
+    var overlay = document.createElement("div");
+    overlay.className = "kz-overlay";
+    var dialog = document.createElement("div");
+    dialog.className = "kz-dialog";
+
+    var kopf = document.createElement("div");
+    kopf.className = "kz-dialog-kopf";
+    var titel = document.createElement("div");
+    titel.className = "kz-dialog-titel"; titel.textContent = k.name;
+    var zu = document.createElement("button");
+    zu.className = "kz-dialog-zu"; zu.textContent = "\u00d7";
+    zu.setAttribute("aria-label", "Schliessen");
+    kopf.appendChild(titel); kopf.appendChild(zu);
+    dialog.appendChild(kopf);
+
+    var unter = document.createElement("div");
+    unter.className = "kz-dialog-unter";
+    unter.textContent = "Verlauf " + reihe[0][0] + " bis " + letzte[0] +
+      " \u00b7 " + reihe.length + " Jahre";
+    dialog.appendChild(unter);
+
+    var graph = document.createElement("div");
+    graph.className = "kz-graph";
+    graph.appendChild(kzGrossgraph(reihe, k.einheit));
+    dialog.appendChild(graph);
+
+    // Wertetabelle, neueste Jahre zuerst
+    var tab = document.createElement("table");
+    tab.className = "kz-tabelle";
+    var thead = document.createElement("thead");
+    thead.innerHTML = "<tr><th>Jahr</th><th>Wert</th><th>Ver\u00e4nderung</th></tr>";
+    tab.appendChild(thead);
+    var tbody = document.createElement("tbody");
+    for (var i = reihe.length - 1; i >= 0; i--) {
+      var tr = document.createElement("tr");
+      var jahr = reihe[i][0], wert = reihe[i][1];
+      var diffTxt = "\u2013";
+      if (i > 0) {
+        var d = wert - reihe[i - 1][1];
+        diffTxt = (d > 0 ? "+" : "") + kzZahl(Math.round(d * 100) / 100);
+      }
+      var einh = k.einheit === "%" ? "%" : "";
+      var hoch = (wert === maxW || wert === minW) ? " class=\"hoch\"" : "";
+      tr.innerHTML = "<td>" + jahr + "</td><td" + hoch + ">" +
+        kzZahl(wert) + einh + "</td><td>" + diffTxt + "</td>";
+      tbody.appendChild(tr);
+    }
+    tab.appendChild(tbody);
+    dialog.appendChild(tab);
+
+    var quelle = document.createElement("div");
+    quelle.className = "kz-dialog-quelle";
+    var qa = document.createElement("a");
+    qa.href = k.quelleUrl || "#"; qa.target = "_blank"; qa.rel = "noopener";
+    qa.textContent = k.quelle || "Quelle";
+    quelle.appendChild(document.createTextNode("Quelle: "));
+    quelle.appendChild(qa);
+    if (k.hinweis) {
+      quelle.appendChild(document.createElement("br"));
+      quelle.appendChild(document.createTextNode(k.hinweis));
+    }
+    dialog.appendChild(quelle);
+
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+
+    function schliessen() {
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      document.removeEventListener("keydown", aufEsc);
+    }
+    function aufEsc(e) { if (e.key === "Escape") schliessen(); }
+    zu.addEventListener("click", schliessen);
+    overlay.addEventListener("click", function (e) {
+      if (e.target === overlay) schliessen();
+    });
+    document.addEventListener("keydown", aufEsc);
+  }
+
   function rendereKZ() {
     var box = $("kz-bereich");
     var kz = window.NEUHAUSEN_KENNZAHLEN;
@@ -1231,6 +1428,7 @@
         name.className = "kz-name"; name.textContent = k.name;
         karte.appendChild(name);
         if (k.typ === "vergleich") {
+          karte.className = "kz-karte kz-nichtklickbar";
           var farben = ["#E2001A", "#6E6E6E", "#B5B5B2"];
           var vgl = document.createElement("div");
           vgl.className = "kz-vgl";
@@ -1314,6 +1512,22 @@
           quelle.appendChild(document.createTextNode(k.hinweis));
         }
         karte.appendChild(quelle);
+        // Ab zwei Jahren: Karte oeffnet die grosse Verlaufsansicht
+        if (reihe.length >= 2) {
+          var mehr = document.createElement("div");
+          mehr.className = "kz-mehr";
+          mehr.textContent = "Verlauf zeigen \u203a";
+          karte.appendChild(mehr);
+          (function (kk) {
+            karte.addEventListener("click", function (e) {
+              // Klick auf den Quellenlink nicht abfangen
+              if (e.target.tagName === "A") return;
+              kzOeffneDetail(kk);
+            });
+          })(k);
+        } else {
+          karte.className += " kz-nichtklickbar";
+        }
         raster.appendChild(karte);
       });
       block.appendChild(raster);
