@@ -61,7 +61,7 @@ SDMX_LEERWOHNUNG = "CH1.LWZ,DF_LWZ_1,1.0.0"
 # Die Dataflow-Kennung wird per Diagnose am echten System verifiziert.
 SDMX_BESTAND = "CH1.GWS,DF_GWS_WHG_1,1.0.0"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 20          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 21          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -1331,10 +1331,11 @@ def _leerwohnungsziffer(region_begriff: str = "neuhausen am rheinfall",
              sonst [(jahr, anzahl), ...]
       extra: dict mit anzahl_reihe, bestand_reihe, zimmer_verteilung, ist_ziffer
     Selbstvalidierend: nur plausible Jahre 1990-2100 und nicht-negative Werte."""
-    # 1) Anzahl leer stehender Wohnungen, Total ueber Zimmer und Typ
-    #    Schluessel: GR_KT_GDE . WOHN_ANZAHL . LEERWOHN_TYP . MEASURE . FREQ
-    #    2937 . _T (alle Zimmer) . _T (alle Typen) . V (Wert) . A (jaehrlich)
-    zeilen, url = _sdmx_csv(SDMX_LEERWOHNUNG, f"{bfs_nr}._T._T.V.A")
+    # 1) Alle Leerwohnungsdaten holen (leere Dimensionen = alle Auspraegungen,
+    #    wie im funktionierenden Original-Aufruf 2937...V.A). Wir filtern die
+    #    Totale dann im Parser heraus. Schluessel-Dimensionen in Reihenfolge:
+    #    GR_KT_GDE . WOHN_ANZAHL . LEERWOHN_TYP . MEASURE_DIMENSION . FREQ
+    zeilen, url = _sdmx_csv(SDMX_LEERWOHNUNG, f"{bfs_nr}...V.A")
     anzahl = {}
     for z in zeilen:
         jahr = (z.get("TIME_PERIOD") or "").strip()
@@ -1355,19 +1356,18 @@ def _leerwohnungsziffer(region_begriff: str = "neuhausen am rheinfall",
     if len(anzahl) < 3:
         raise RuntimeError(f"zu wenige Leerwohnungs-Werte aus SDMX ({len(anzahl)})")
 
-    # 2) Aufschluesselung nach Zimmerzahl fuer das neueste Jahr
-    #    (alle Zimmerkategorien, Typ Total)
-    zimmer_zeilen, _ = _sdmx_csv(SDMX_LEERWOHNUNG, f"{bfs_nr}..._T.V.A")
+    # 2) Aufschluesselung nach Zimmerzahl fuer das neueste Jahr aus denselben
+    #    bereits geladenen Zeilen (Typ Total, einzelne Zimmerkategorien).
     neuestes = max(anzahl)
     zimmer_namen = {"1": "1 Zimmer", "2": "2 Zimmer", "3": "3 Zimmer",
                     "4": "4 Zimmer", "5": "5 Zimmer", "6": "6+ Zimmer"}
     verteilung = {}
-    for z in zimmer_zeilen:
+    for z in zeilen:
         jahr = (z.get("TIME_PERIOD") or "").strip()
         zc = (z.get("WOHN_ANZAHL") or "").strip()
         typ = (z.get("LEERWOHN_TYP") or "_T").strip()
         wert = (z.get("OBS_VALUE") or "").strip()
-        # Nur Typ-Total-Zeilen, sonst wuerden Typ-Unterkategorien mitzaehlen
+        # Nur Typ-Total-Zeilen, sonst zaehlen Typ-Unterkategorien mit
         if jahr == neuestes and typ in ("_T", "", "T") \
                 and zc in zimmer_namen and wert:
             try:
@@ -1424,16 +1424,53 @@ def diagnose_leerwohnung():
         print(f"FEHLGESCHLAGEN: {e}")
 
     print("\n--- Bestand (GWS) separat pruefen ---")
-    try:
-        best = _leerwohnung_bestand()
-        if best:
-            js = sorted(best.items())
-            print(f"Bestand: {len(js)} Jahre, {js[0]} ... {js[-1]}")
-        else:
-            print("Bestand-Quelle lieferte keine Daten "
-                  "(Dataflow-Kennung SDMX_BESTAND pruefen)")
-    except Exception as e:
-        print(f"Bestand-FEHLER: {e}")
+    # Mehrere plausible Dataflow-Kennungen fuer den Wohnungsbestand testen,
+    # da die genaue Kennung noch nicht verifiziert ist.
+    kandidaten = [
+        "CH1.GWS,DF_GWS_WHG_1,1.0.0",
+        "CH1.GWS,DF_GWS_WHG,1.0.0",
+        "CH1.BEW,DF_BEW_WHG_1,1.0.0",
+        "CH1.GWS,DF_GWS_BUILDING_DWELLING,1.0.0",
+        "CH1.STATBL,DF_WOHNUNGEN,1.0.0",
+    ]
+    for df in kandidaten:
+        url = (f"{SDMX_BASIS}/{df}/2937...A"
+               f"?dimensionAtObservation=AllDimensions")
+        try:
+            kopf = dict(HEADERS)
+            kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
+            r = requests.get(url, headers=kopf, timeout=40)
+            status = r.status_code
+            groesse = len(r.content)
+            print(f"  {df}: HTTP {status}, {groesse:,} Bytes")
+            if status < 400 and groesse > 200:
+                kopfzeile = r.content.decode("utf-8-sig", "replace").split("\n")[0]
+                print(f"    Spalten: {kopfzeile[:120]}")
+        except Exception as e:
+            print(f"  {df}: FEHLER {str(e)[:60]}")
+    print("  (Die antwortende Kennung wird als SDMX_BESTAND eingetragen.)")
+
+    print("\n--- Verfuegbare Dataflows im Register (Suche nach Wohnungs-Bestand) ---")
+    for agentur in ("CH1.GWS", "CH1.BEW", "CH1"):
+        url = f"https://disseminate.stats.swiss/rest/dataflow/{agentur}"
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=40)
+            print(f"  {agentur}: HTTP {r.status_code}, {len(r.content):,} Bytes")
+            if r.status_code < 400:
+                txt = r.content.decode("utf-8", "replace")
+                # Dataflow-IDs und Namen grob herausfischen
+                import re as _re
+                ids = _re.findall(r'(?:id|agencyID)="([^"]+)"', txt)
+                namen = _re.findall(r'<[^>]*Name[^>]*>([^<]{5,70})</', txt)
+                interessant = [n for n in namen if any(
+                    w in n.lower() for w in ("wohnung", "dwelling", "bestand",
+                                             "logement", "gws"))]
+                if ids:
+                    print(f"    IDs (Ausschnitt): {sorted(set(ids))[:12]}")
+                if interessant:
+                    print(f"    Passende Namen: {interessant[:6]}")
+        except Exception as e:
+            print(f"  {agentur}: FEHLER {str(e)[:60]}")
     print("\n===== Ende Leerwohnungs-Diagnose =====")
 
 
