@@ -51,7 +51,7 @@ PRESSE_LEAD_MAX_PRO_LAUF = 40    # so viele fehlende Leads werden pro Lauf gehol
 PRESSE_RUECKFUELL_AB_JAHR = 2020
 KENNZAHLEN_AUSGABE = BASIS / "kennzahlen.js"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 12          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 13          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -1389,6 +1389,60 @@ LEERWOHNUNG_CKAN = ("https://opendata.swiss/api/3/action/package_show"
                     "?id=leerwohnungsziffer-nach-gemeinde")
 
 
+def _leerwohnung_langformat(zeilen, region_begriff):
+    """Parst das lange Format: eine Zeile pro Gemeinde und Jahr, mit
+    Spaltenkopf. Bestimmt Jahr- und Wertspalte aus den Koepfen; die
+    Wertspalte muss eindeutig sein (Kopf mit 'ziffer'/'quote'/'anteil'),
+    sonst Abbruch, damit nie Anzahlen mit Ziffern verwechselt werden."""
+    kopf_idx = jahr_sp = None
+    for i, row in enumerate(zeilen[:10]):
+        for j, zelle in enumerate(row):
+            t = str(zelle or "").lower()
+            if t in ("jahr", "year", "periode", "period") or "jahr" == t[:4]:
+                kopf_idx, jahr_sp = i, j
+                break
+        if kopf_idx is not None:
+            break
+    if kopf_idx is None:
+        raise RuntimeError("weder Breit- noch Langformat erkannt")
+    kopf = [str(z or "").lower() for z in zeilen[kopf_idx]]
+    wert_sp = None
+    for j, t in enumerate(kopf):
+        if any(b in t for b in ("ziffer", "quote", "anteil")):
+            wert_sp = j
+            break
+    if wert_sp is None:
+        raise RuntimeError("Langformat: keine eindeutige Ziffern-Spalte")
+
+    reihe = []
+    for row in zeilen[kopf_idx + 1:]:
+        rtext = " ".join(str(z) for z in row if z is not None).lower()
+        if region_begriff not in rtext and not re.search(r"\b2937\b", rtext):
+            continue
+        if jahr_sp >= len(row) or wert_sp >= len(row):
+            continue
+        jj = str(row[jahr_sp]).strip()[:4]
+        if not re.match(r"^(19|20)\d{2}$", jj):
+            continue
+        w = row[wert_sp]
+        if isinstance(w, str):
+            w = w.strip().replace("%", "").replace(",", ".")
+            try:
+                w = float(w)
+            except ValueError:
+                continue
+        if isinstance(w, (int, float)) and 0 <= w <= 30:
+            reihe.append((jj, round(float(w), 2)))
+    if len(reihe) < 3:
+        raise RuntimeError(f"Langformat: zu wenige plausible Werte ({len(reihe)})")
+    # pro Jahr nur ein Wert (letzter gewinnt), dann sortieren
+    eindeutig = {}
+    for j, w in reihe:
+        eindeutig[j] = w
+    return (sorted(eindeutig.items()),
+            "https://opendata.swiss/de/dataset/leerwohnungsziffer-nach-gemeinde")
+
+
 def _leerwohnung_opendata(region_begriff: str) -> tuple:
     """Rueckfallebene: laedt die Leerwohnungsziffer aus den offenen Daten
     der Leerwohnungszaehlung (opendata.swiss-Katalog -> BFS-Datei).
@@ -1459,7 +1513,9 @@ def _leerwohnung_opendata(region_begriff: str) -> tuple:
             kopf_idx, jahr_spalten = i, gefunden
             break
     if kopf_idx is None:
-        raise RuntimeError("keine Jahres-Kopfzeile gefunden")
+        # Kein Breitformat -> Versuch im langen Format (eine Zeile pro
+        # Gemeinde und Jahr), ebenfalls selbstvalidierend.
+        return _leerwohnung_langformat(zeilen, region_begriff)
 
     # 4) Gemeindezeile finden: Namens-Treffer hat Vorrang; die BFS-Nummer
     # dient nur als Rueckfallebene (eine Zahl 2937 koennte theoretisch
@@ -2111,9 +2167,36 @@ def diagnose_leerwohnung():
         r = requests.get(LEERWOHNUNG_CKAN, headers=HEADERS, timeout=60)
         print(f"  Katalog-Status: {r.status_code}")
         paket = r.json()
-        for res in paket.get("result", {}).get("resources", []):
+        ressourcen = paket.get("result", {}).get("resources", [])
+        for res in ressourcen:
             print(f"    Ressource: format={res.get('format')!r} "
                   f"url={(res.get('download_url') or res.get('url') or '')[:90]}")
+        # Erste ladbare Datei holen und ihren Kopf offenlegen
+        for res in ressourcen:
+            fmt = (res.get("format") or "").lower()
+            url = res.get("download_url") or res.get("url") or ""
+            if not url or fmt not in ("xlsx", "xls", "csv"):
+                continue
+            print(f"\n  --- Dateikopf ({fmt}) ---")
+            d = requests.get(url, headers=HEADERS, timeout=120)
+            print(f"  Datei-Status: {d.status_code}, {len(d.content):,} Bytes")
+            if fmt in ("xlsx", "xls"):
+                import io
+                import openpyxl
+                wb = openpyxl.load_workbook(io.BytesIO(d.content),
+                                            read_only=True, data_only=True)
+                print(f"  Blaetter: {wb.sheetnames}")
+                for name in wb.sheetnames[:3]:
+                    print(f"  --- Blatt {name!r}, erste 12 Zeilen ---")
+                    for i, row in enumerate(wb[name].iter_rows(values_only=True)):
+                        if i >= 12:
+                            break
+                        print(f"    {i}: {list(row)[:8]}")
+            else:
+                text = d.content.decode("utf-8-sig", "replace")
+                for i, zeile in enumerate(text.splitlines()[:12]):
+                    print(f"    {i}: {zeile[:160]}")
+            break
     except Exception as e:
         print(f"  Katalog-FEHLER: {e}")
     try:
