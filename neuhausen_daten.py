@@ -1510,6 +1510,41 @@ def _parse_leerwohnung_zeilen(zeilen, region_begriff):
     return reihe
 
 
+def _dam_download_urls(meta) -> list:
+    """Sucht rekursiv alle http-Adressen in den Asset-Metadaten und ordnet
+    sie nach Eignung: Excel zuerst, dann CSV, dann Uebriges mit Download-
+    Bezug. So muss der Download-Pfad nicht geraten werden."""
+    gefunden = []
+
+    def gehe(knoten):
+        if isinstance(knoten, dict):
+            for v in knoten.values():
+                gehe(v)
+        elif isinstance(knoten, list):
+            for v in knoten:
+                gehe(v)
+        elif isinstance(knoten, str) and knoten.startswith("http"):
+            gefunden.append(knoten)
+
+    gehe(meta)
+
+    def rang(u):
+        ul = u.lower()
+        if ".xlsx" in ul or ".xls" in ul:
+            return 0
+        if ".csv" in ul:
+            return 1
+        if "master" in ul or "download" in ul or "dam-api" in ul:
+            return 2
+        return 3
+
+    eindeutig = []
+    for u in sorted(gefunden, key=rang):
+        if u not in eindeutig and rang(u) < 3:
+            eindeutig.append(u)
+    return eindeutig
+
+
 def _leerwohnung_bfs_asset(region_begriff: str) -> tuple:
     """Rueckfallebene ueber die BFS-Asset-Schnittstelle: ermittelt aus dem
     bekannten Asset die stabile Bestellnummer, holt darueber den neuesten
@@ -1541,19 +1576,60 @@ def _leerwohnung_bfs_asset(region_begriff: str) -> tuple:
     except Exception:
         pass  # Bestellnummern-Weg optional; bekanntes Asset bleibt Rueckhalt
 
-    # 2) Datei laden
-    r = requests.get(f"{DAM_API}/{asset_id}/master", headers=HEADERS, timeout=120)
-    r.raise_for_status()
+    # 2) Datei laden: Download-Adressen aus den Metadaten des gewaehlten
+    # Assets extrahieren (der /master-Pfad existiert nicht mehr fuer alle
+    # Assets); /master bleibt letzter Kandidat.
+    try:
+        rm = requests.get(f"{DAM_API}/{asset_id}", headers=HEADERS, timeout=60)
+        rm.raise_for_status()
+        kandidaten = _dam_download_urls(rm.json())
+    except Exception:
+        kandidaten = []
+    kandidaten.append(f"{DAM_API}/{asset_id}/master")
+
+    inhalt = None
+    letzte_fehler = []
+    for url in kandidaten[:6]:
+        try:
+            rd = requests.get(url, headers=HEADERS, timeout=120)
+            if rd.status_code < 400 and len(rd.content) > 500:
+                # Eignung pruefen: Excel-Signatur oder CSV-artiger Text.
+                # JSON-Antworten (API-Links) werden uebersprungen, damit ein
+                # spaeterer Kandidat noch zum Zug kommt.
+                if rd.content[:2] == b"PK":
+                    inhalt = rd.content
+                    break
+                probe = rd.content[:2000].decode("utf-8-sig", "replace").lstrip()
+                if not probe.startswith(("{", "[", "<")) \
+                        and (";" in probe or "," in probe):
+                    inhalt = rd.content
+                    break
+                letzte_fehler.append(f"{url[:70]}: kein Tabellenformat")
+                continue
+            letzte_fehler.append(f"{url[:70]}: HTTP {rd.status_code}")
+        except Exception as e:
+            letzte_fehler.append(f"{url[:70]}: {e}")
+    if inhalt is None:
+        raise RuntimeError("kein Download moeglich (" +
+                           "; ".join(letzte_fehler[:3]) + ")")
 
     import io
     import openpyxl
-    wb = openpyxl.load_workbook(io.BytesIO(r.content),
-                                read_only=True, data_only=True)
+    if inhalt[:2] == b"PK":          # Excel (Zip-Signatur)
+        wb = openpyxl.load_workbook(io.BytesIO(inhalt),
+                                    read_only=True, data_only=True)
+        blaetter = [(n, [list(row) for row in wb[n].iter_rows(values_only=True)])
+                    for n in wb.sheetnames]
+    else:                             # CSV/Text
+        import csv
+        text = inhalt.decode("utf-8-sig", "replace")
+        trenner = ";" if text.count(";") > text.count(",") else ","
+        blaetter = [("csv", [row for row in
+                             csv.reader(io.StringIO(text), delimiter=trenner)])]
 
     # 3a) Erst je Blatt den generischen Parser versuchen (Jahre als Spalten)
     fehler = []
-    for name in wb.sheetnames:
-        zeilen = [list(row) for row in wb[name].iter_rows(values_only=True)]
+    for name, zeilen in blaetter:
         try:
             return _parse_leerwohnung_zeilen(zeilen, region_begriff), quelle
         except Exception as e:
@@ -1562,12 +1638,11 @@ def _leerwohnung_bfs_asset(region_begriff: str) -> tuple:
     # 3b) Ein Blatt pro Jahr: Blattname enthaelt das Jahr, im Kopf eine
     # Ziffern-Spalte, darunter die Gemeindezeilen.
     reihe = {}
-    for name in wb.sheetnames:
+    for name, zeilen in blaetter:
         m = re.search(r"(19|20)\d{2}", name)
         if not m:
             continue
         jahr = m.group(0)
-        zeilen = [list(row) for row in wb[name].iter_rows(values_only=True)]
         kopf_idx = wert_sp = None
         for i, row in enumerate(zeilen[:15]):
             for j, zelle in enumerate(row):
@@ -2498,21 +2573,34 @@ def diagnose_leerwohnung():
             meta = r.json()
             order_nr = (meta.get("shop") or {}).get("orderNr") or meta.get("orderNr")
             print(f"  Bestellnummer: {order_nr!r}")
-        d = requests.get(f"{DAM_API}/{LEERWOHNUNG_ASSET_BEKANNT}/master",
-                         headers=HEADERS, timeout=120)
-        print(f"  Datei: HTTP {d.status_code}, {len(d.content):,} Bytes")
-        if d.status_code < 400:
-            import io
-            import openpyxl
-            wb = openpyxl.load_workbook(io.BytesIO(d.content),
-                                        read_only=True, data_only=True)
-            print(f"  Blaetter: {wb.sheetnames}")
-            for name in wb.sheetnames[:2]:
-                print(f"  --- Blatt {name!r}, erste 10 Zeilen ---")
-                for i, row in enumerate(wb[name].iter_rows(values_only=True)):
-                    if i >= 10:
-                        break
-                    print(f"    {i}: {list(row)[:8]}")
+            urls = _dam_download_urls(meta)
+            print(f"  Download-Kandidaten aus den Metadaten ({len(urls)}):")
+            for u in urls[:8]:
+                print(f"    {u[:110]}")
+            for u in urls[:6]:
+                d = requests.get(u, headers=HEADERS, timeout=120)
+                print(f"  Versuch {u[:70]}: HTTP {d.status_code}, "
+                      f"{len(d.content):,} Bytes")
+                if d.status_code < 400 and len(d.content) > 500:
+                    if d.content[:2] == b"PK":
+                        import io
+                        import openpyxl
+                        wb = openpyxl.load_workbook(io.BytesIO(d.content),
+                                                    read_only=True,
+                                                    data_only=True)
+                        print(f"  Blaetter: {wb.sheetnames}")
+                        for name in wb.sheetnames[:2]:
+                            print(f"  --- Blatt {name!r}, erste 10 Zeilen ---")
+                            for i, row in enumerate(
+                                    wb[name].iter_rows(values_only=True)):
+                                if i >= 10:
+                                    break
+                                print(f"    {i}: {list(row)[:8]}")
+                    else:
+                        text = d.content.decode("utf-8-sig", "replace")
+                        for i, zeile in enumerate(text.splitlines()[:10]):
+                            print(f"    {i}: {zeile[:160]}")
+                    break
     except Exception as e:
         print(f"  Metadaten/Datei-FEHLER: {e}")
     try:
