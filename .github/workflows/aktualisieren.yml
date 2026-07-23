@@ -40,6 +40,11 @@ jobs:
         run: python neuhausen_daten.py
 
       - name: Neue Daten speichern
+        # Laeuft AUCH, wenn der Datenlauf abgebrochen ist. Dank der
+        # Zwischensicherung im Skript sind dann die bis dahin geholten
+        # Daten vorhanden und werden uebernommen. Ohne dieses "always()"
+        # waere alles verloren.
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
