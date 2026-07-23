@@ -68,7 +68,7 @@ GEMEINNUETZIG_ASSET = "https://dam-api.bfs.admin.ch/hub/api/dam/assets/16564299/
 # Die Dataflow-Kennung wird per Diagnose am echten System verifiziert.
 SDMX_BESTAND = "CH1.GWS,DF_GWS_WHG_1,1.0.0"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 25          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 26          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -1674,7 +1674,7 @@ def _leerwohnungsziffer(region_begriff: str = "neuhausen am rheinfall",
                     "4": "4 Zimmer", "5": "5 Zimmer", "6": "6+ Zimmer"}
     zimmer_reihenfolge = ["1 Zimmer", "2 Zimmer", "3 Zimmer",
                           "4 Zimmer", "5 Zimmer", "6+ Zimmer"]
-    verteilung = {}          # neuestes Jahr: {name: anzahl}
+    verteilung = {}          # neuestes Jahr MIT Zimmerdaten: {name: anzahl}
     verteilung_jahre = {}    # alle Jahre: {name: {jahr: anzahl}}
     for z in zeilen:
         jahr = (z.get("TIME_PERIOD") or "").strip()
@@ -1687,10 +1687,19 @@ def _leerwohnungsziffer(region_begriff: str = "neuhausen am rheinfall",
                 v = int(round(float(wert)))
             except ValueError:
                 continue
-            name = zimmer_namen[zc]
-            verteilung_jahre.setdefault(name, {})[jahr] = v
-            if jahr == neuestes:
-                verteilung[name] = v
+            verteilung_jahre.setdefault(zimmer_namen[zc], {})[jahr] = v
+
+    # Das neueste Jahr der ZIMMERDATEN bestimmen. Es kann aelter sein als das
+    # neueste Gesamtjahr, weil dieses aus der Gemeinde-Meldung ergaenzt wird,
+    # die keine Aufschluesselung nach Zimmerzahl enthaelt.
+    zimmer_jahre = set()
+    for jahre_dict in verteilung_jahre.values():
+        zimmer_jahre.update(jahre_dict.keys())
+    neuestes_zimmer = max(zimmer_jahre) if zimmer_jahre else None
+    if neuestes_zimmer:
+        for name, jahre_dict in verteilung_jahre.items():
+            if neuestes_zimmer in jahre_dict:
+                verteilung[name] = jahre_dict[neuestes_zimmer]
     # Aufsteigend nach Zimmerzahl ordnen (1,2,3,4,5,6+)
     verteilung = {n: verteilung[n] for n in zimmer_reihenfolge
                   if n in verteilung}
@@ -1715,17 +1724,31 @@ def _leerwohnungsziffer(region_begriff: str = "neuhausen am rheinfall",
     # also bestand[jahr-1].
     anzahl_reihe = sorted((j, v) for j, v in anzahl.items())
     ist_ziffer = bool(bestand)
+    genaehert = []
     if ist_ziffer:
+        bestand_jahre = sorted(int(j) for j in bestand)
         reihe = []
         for jahr, leer in anzahl_reihe:
             vorjahr = str(int(jahr) - 1)
             best = bestand.get(vorjahr)
+            if not best and bestand_jahre:
+                # Kein exakter Vorjahresbestand: naechstgelegenes Jahr nehmen.
+                # Der Wohnungsbestand aendert sich langsam, daher ist das eine
+                # vertretbare Naeherung. Wir merken uns diese Jahre und weisen
+                # sie im Kartenhinweis aus, statt die Reihe zu zerloechern.
+                ziel = int(vorjahr)
+                naechstes = min(bestand_jahre, key=lambda j: abs(j - ziel))
+                # Nur nutzen, wenn nicht weiter als 4 Jahre entfernt
+                if abs(naechstes - ziel) <= 4:
+                    best = bestand[str(naechstes)]
+                    genaehert.append(jahr)
             if best and best > 0:
                 reihe.append((jahr, round(leer / best * 100, 2)))
-        # Falls fuer zu wenige Jahre ein Vorjahresbestand vorliegt, auf Anzahl
+        # Falls fuer zu wenige Jahre ein Bestand vorliegt, auf Anzahl
         if len(reihe) < 3:
             ist_ziffer = False
             reihe = anzahl_reihe
+            genaehert = []
     else:
         reihe = anzahl_reihe
 
@@ -1755,6 +1778,8 @@ def _leerwohnungsziffer(region_begriff: str = "neuhausen am rheinfall",
         "zimmer_verteilung_jahre": verteilung_jahre,
         "quote_je_zimmer": quote_je_zimmer,
         "neuestes_jahr": neuestes,
+        "neuestes_zimmer_jahr": neuestes_zimmer,
+        "genaeherte_jahre": genaehert,
         "ist_ziffer": ist_ziffer,
     }
     return reihe, url, extra
@@ -2219,6 +2244,11 @@ def baue_kennzahlen() -> None:
                        "Anzahl leer stehender, am Markt angebotener Wohnungen "
                        "(Stichtag 1. Juni). Bei kleinen Gemeinden stark "
                        "schwankend.")
+            gen = extra.get("genaeherte_jahre") or []
+            if ist_ziffer and gen:
+                hinweis += (f" Für {len(gen)} ältere Jahrgänge liegt kein "
+                            f"exakter Vorjahresbestand vor; dort wurde der "
+                            f"zeitlich nächstgelegene Bestand verwendet.")
             karte("Wohnen", name, einheit, reihe,
                   "BFS, Leerwohnungszählung (data.stats.swiss)", url,
                   hinweis=hinweis)
@@ -2242,7 +2272,10 @@ def baue_kennzahlen() -> None:
             # sonst die Anzahl leer stehender Wohnungen.
             verteilung = extra.get("zimmer_verteilung") or {}
             quote = extra.get("quote_je_zimmer") or {}
-            neuestes = extra.get("neuestes_jahr", "")
+            # Das Jahr der Zimmerdaten kann aelter sein als das Gesamtjahr,
+            # weil die Gemeinde-Meldung keine Aufschluesselung enthaelt.
+            neuestes = (extra.get("neuestes_zimmer_jahr")
+                        or extra.get("neuestes_jahr", ""))
             quote_aktuell = {}
             for label, jahre_q in quote.items():
                 if neuestes in jahre_q:
