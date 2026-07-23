@@ -67,7 +67,7 @@ GEMEINNUETZIG_ASSET = "https://dam-api.bfs.admin.ch/hub/api/dam/assets/16564299/
 # Die Dataflow-Kennung wird per Diagnose am echten System verifiziert.
 SDMX_BESTAND = "CH1.GWS,DF_GWS_WHG_1,1.0.0"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 32          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 33          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -1306,21 +1306,35 @@ def _wachstum(reihe: list, ab_jahr: int):
     return round((ab[-1][1] / ab[0][1] - 1) * 100, 1)
 
 
-def _sdmx_csv(dataflow: str, schluessel: str, timeout: int = 90) -> list:
-    """Ruft die SDMX-API im CSV-Format ab und gibt eine Liste von dict-Zeilen
-    zurueck (Spaltenname -> Wert). Robust gegen die begleitenden Struktur- und
-    Metadatenspalten der Bundesstatistik-Schnittstelle."""
+def _sdmx_csv(dataflow: str, schluessel: str, timeout: int = 30,
+              filter_fn=None) -> tuple:
+    """Ruft die SDMX-API im CSV-Format ab und gibt (zeilen, url) zurueck.
+
+    Speicherschonend: Die Antwort wird zeilenweise gelesen (Streaming) statt
+    komplett in den Speicher geladen. Optional filtert `filter_fn(zeile)`
+    schon beim Lesen, sodass nur die benoetigten Zeilen im Speicher landen.
+    Das ist wichtig, weil einzelne BFS-Antworten mehrere Megabyte gross sind
+    und als Python-Objekte ein Vielfaches davon belegen wuerden.
+    """
     import csv
-    import io
     url = (f"{SDMX_BASIS}/{dataflow}/{schluessel}"
            f"?dimensionAtObservation=AllDimensions")
     kopf = dict(HEADERS)
     kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
-    r = requests.get(url, headers=kopf, timeout=timeout)
+    r = requests.get(url, headers=kopf, timeout=timeout, stream=True)
     r.raise_for_status()
-    text = r.content.decode("utf-8-sig", "replace")
-    leser = csv.DictReader(io.StringIO(text))
-    return list(leser), url
+    r.encoding = r.encoding or "utf-8"
+
+    zeilen = []
+    # iter_lines liefert die Antwort haeppchenweise; so liegt nie die
+    # gesamte Datei gleichzeitig im Speicher.
+    quelle = (z for z in r.iter_lines(decode_unicode=True) if z is not None)
+    leser = csv.DictReader(quelle)
+    for zeile in leser:
+        if filter_fn is None or filter_fn(zeile):
+            zeilen.append(zeile)
+    r.close()
+    return zeilen, url
 
 
 def _sdmx_struktur_dimensionen(struktur_id: str) -> list:
@@ -1736,7 +1750,15 @@ def _leerwohnungsziffer(region_begriff: str = "neuhausen am rheinfall",
     #    wie im funktionierenden Original-Aufruf 2937...V.A). Wir filtern die
     #    Totale dann im Parser heraus. Schluessel-Dimensionen in Reihenfolge:
     #    GR_KT_GDE . WOHN_ANZAHL . LEERWOHN_TYP . MEASURE_DIMENSION . FREQ
-    zeilen, url = _sdmx_csv(SDMX_LEERWOHNUNG, f"{bfs_nr}...V.A")
+    # Nur die benoetigten Zeilen behalten: Typ-Total (Gesamtzahl und
+    # Zimmeraufschluesselung). Der Rest der Antwort wird verworfen, ohne
+    # je vollstaendig im Speicher zu landen.
+    def _brauchbar(z):
+        typ = (z.get("LEERWOHN_TYP") or "_T").strip()
+        return typ in ("_T", "", "T")
+
+    zeilen, url = _sdmx_csv(SDMX_LEERWOHNUNG, f"{bfs_nr}...V.A",
+                            filter_fn=_brauchbar)
     anzahl = {}
     for z in zeilen:
         jahr = (z.get("TIME_PERIOD") or "").strip()
@@ -2251,6 +2273,36 @@ def diagnose_leerwohnung():
 
 
 
+def _sichere_kennzahlen(bereiche, vollstaendig=True, takt_tage=None) -> None:
+    """Schreibt den aktuellen Kennzahlen-Stand. Wird waehrend des Aufbaus
+    mehrfach aufgerufen, damit ein spaeterer Abbruch die bereits geholten
+    Kennzahlen nicht vernichtet.
+
+    Bei einem unvollstaendigen Stand wird die naechste Pruefung auf morgen
+    gesetzt, damit die fehlenden Kennzahlen bald nachgeholt werden."""
+    if not bereiche:
+        return
+    from datetime import timedelta
+    jetzt = datetime.now(_ZEITZONE) if _ZEITZONE else datetime.now()
+    takt = takt_tage if takt_tage is not None else (
+        KENNZAHLEN_PRUEFTAKT_TAGE if vollstaendig else 1)
+    obj = {
+        "version": KENNZAHLEN_VERSION,
+        "stand": jetzt.strftime("%d.%m.%Y %H:%M"),
+        "naechste_pruefung": int((jetzt + timedelta(
+            days=takt)).strftime("%Y%m%d")),
+        "bereiche": bereiche,
+        "vollstaendig": vollstaendig,
+    }
+    try:
+        KENNZAHLEN_AUSGABE.write_text(
+            "window.NEUHAUSEN_KENNZAHLEN = "
+            + json.dumps(obj, ensure_ascii=False) + ";\n", encoding="utf-8")
+    except Exception as e:
+        print(f"  Kennzahlen konnten nicht gesichert werden: {e}",
+              file=sys.stderr)
+
+
 def baue_kennzahlen() -> None:
     # Zwischenspeicher: hoechstens einmal pro Woche neu abfragen
     if KENNZAHLEN_AUSGABE.exists():
@@ -2309,6 +2361,12 @@ def baue_kennzahlen() -> None:
         if extra:
             eintrag.update(extra)
         ziel["karten"].append(eintrag)
+        # Nach jeder Karte sichern. Bricht der Prozess spaeter ab (z. B.
+        # weil eine externe Schnittstelle zu grosse Antworten liefert),
+        # bleiben die bereits geholten Kennzahlen erhalten statt verloren
+        # zu gehen. Der Schreibvorgang ist klein und faellt nicht ins
+        # Gewicht.
+        _sichere_kennzahlen(bereiche, vollstaendig=False)
 
     # --- Bevoelkerung (BFS, demografische Bilanz je Gemeinde) ---
     # Der Wuerfel schluesselt nach Staatsangehoerigkeit (Einzellaender + Total)
@@ -2668,18 +2726,15 @@ def baue_kennzahlen() -> None:
         print("  Kennzahlen: unvollstaendig (Zeitbudget), "
               "naechster Versuch morgen", flush=True)
 
-    obj = {
-        "version": KENNZAHLEN_VERSION,
-        "stand": jetzt.strftime("%d.%m.%Y %H:%M"),
-        "naechste_pruefung": int((jetzt + timedelta(
-            days=takt)).strftime("%Y%m%d")),
-        "bereiche": bereiche,
-    }
-    KENNZAHLEN_AUSGABE.write_text(
-        "window.NEUHAUSEN_KENNZAHLEN = "
-        + json.dumps(obj, ensure_ascii=False) + ";\n", encoding="utf-8")
+    _sichere_kennzahlen(bereiche, vollstaendig=not unvollstaendig,
+                        takt_tage=takt)
     print(f"  Kennzahlen: {sum(len(b['karten']) for b in bereiche)} Karten "
-          f"in {len(bereiche)} Bereichen geschrieben")
+          f"in {len(bereiche)} Bereichen geschrieben"
+          + (" (unvollstaendig)" if unvollstaendig else ""))
+    if fehler:
+        print(f"  Kennzahlen: {len(fehler)} nicht abrufbar:")
+        for f in fehler[:8]:
+            print(f"    - {f}")
 
 
 def diagnose_stattab():
@@ -3115,36 +3170,50 @@ def main():
     except Exception as e:
         print(f"  Presse FEHLER: {e}", file=sys.stderr)
 
+    # WICHTIG: Die Website-Daten werden JETZT gespeichert, VOR den
+    # Kennzahlen. Diese greifen auf externe Statistik-Schnittstellen zu und
+    # sind der einzige Teil, der den Lauf zum Absturz bringen kann (grosse
+    # Antworten, Speicherbedarf). Wird der Prozess dort vom System beendet,
+    # sind die Vorstoesse, Berichte, Beschluesse, Aktuelles und Presse
+    # bereits sicher geschrieben. Die Kennzahlen behalten dann einfach
+    # ihren letzten Stand.
+    def _schreibe_hauptdaten():
+        daten = {
+            "erzeugt": datetime.now(_ZEITZONE).strftime("%d.%m.%Y %H:%M"),
+            "fehler": fehler,
+            "vorstoesse": vorstoesse,
+            "berichte": berichte,
+            "beschluesse": beschluesse,
+            "aktuelles": aktuelles,
+            "presse": presse,
+        }
+        js = ("window.NEUHAUSEN_DATEN = "
+              + json.dumps(daten, ensure_ascii=False) + ";\n")
+        AUSGABE.write_text(js, encoding="utf-8")
+        feed = baue_feed(vorstoesse, berichte, beschluesse, aktuelles, presse)
+        FEED_AUSGABE.write_text(feed, encoding="utf-8")
+
+    schritt("Daten sichern (vor den Kennzahlen)")
+    _schreibe_hauptdaten()
+
     if "--ohne-kennzahlen" not in sys.argv:
         schritt("Kennzahlen (BFS + Finanzen)")
         try:
             baue_kennzahlen()
         except Exception as e:
+            fehler.append(f"Kennzahlen: {e}")
             print(f"  Kennzahlen FEHLER: {e}", file=sys.stderr)
+        # Erneut schreiben, damit allfaellige Kennzahl-Fehler in der
+        # Fehlerliste der Website erscheinen.
+        _schreibe_hauptdaten()
     else:
         print("Kennzahlen uebersprungen (--ohne-kennzahlen)")
-
-    daten = {
-        "erzeugt": datetime.now(_ZEITZONE).strftime("%d.%m.%Y %H:%M"),
-        "fehler": fehler,
-        "vorstoesse": vorstoesse,
-        "berichte": berichte,
-        "beschluesse": beschluesse,
-        "aktuelles": aktuelles,
-        "presse": presse,
-    }
 
     if UNBEKANNTE_PERSONEN:
         print("\nNicht zugeordnete Personen (bitte in FRAKTIONEN ergaenzen):")
         for name in sorted(UNBEKANNTE_PERSONEN):
             print(f"    \"{name}\": \"?\",")
         print()
-
-    js = "window.NEUHAUSEN_DATEN = " + json.dumps(daten, ensure_ascii=False) + ";\n"
-    AUSGABE.write_text(js, encoding="utf-8")
-
-    feed = baue_feed(vorstoesse, berichte, beschluesse, aktuelles, presse)
-    FEED_AUSGABE.write_text(feed, encoding="utf-8")
 
     # Die Volltext-Erfassung laeuft standardmaessig NICHT mehr im Hauptlauf.
     # Sie ist der mit Abstand aufwendigste Teil (PDF-Download, Textextraktion,

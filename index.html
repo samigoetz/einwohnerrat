@@ -1893,7 +1893,10 @@
       return;
     }
     $("kz-stand").textContent = "Datenstand Kennzahlen: " + (kz.stand || "\u2013") +
-      " \u00b7 amtliche Quellen, Angabe pro Kennzahl";
+      " \u00b7 amtliche Quellen, Angabe pro Kennzahl" +
+      (kz.vollstaendig === false
+        ? " \u00b7 einzelne Kennzahlen konnten zuletzt nicht abgerufen werden"
+        : "");
     kz.bereiche.forEach(function (bereich) {
       var block = document.createElement("div");
       block.className = "stat-block";
