@@ -68,7 +68,7 @@ GEMEINNUETZIG_ASSET = "https://dam-api.bfs.admin.ch/hub/api/dam/assets/16564299/
 # Die Dataflow-Kennung wird per Diagnose am echten System verifiziert.
 SDMX_BESTAND = "CH1.GWS,DF_GWS_WHG_1,1.0.0"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 27          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 28          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -2408,27 +2408,28 @@ def baue_kennzahlen() -> None:
                 karte("Wohnen", "Leerstand nach Wohnungsgrösse", "%",
                       reihe_v, "BFS, Leerwohnungszählung und GWS "
                                "(data.stats.swiss)", url,
-                      hinweis=f"Anteil leer stehender Wohnungen am Bestand "
-                              f"der jeweiligen Grösse ({neuestes}). Zeigt, bei "
-                              f"welcher Wohnungsgrösse anteilig am meisten "
-                              f"leer steht.",
+                      hinweis="Anteil leer stehender Wohnungen am Bestand "
+                              "der jeweiligen Grösse. Zeigt, bei welcher "
+                              "Wohnungsgrösse anteilig am meisten leer steht.",
                       extra={"typ": "verteilung",
                              "verlauf_je_kategorie": quote,
                              "verlauf_einheit": "%",
-                             "anteil_ist_wert": True})
+                             "anteil_ist_wert": True,
+                             "stand": neuestes})
                 print(f"  Kennzahlen: Leerstandsquote nach Zimmerzahl "
-                      f"({len(reihe_v)} Kategorien)")
+                      f"({len(reihe_v)} Kategorien, Stand {neuestes})")
             elif verteilung and sum(verteilung.values()) > 0:
                 reihe_v = [(k, v) for k, v in verteilung.items()]
                 vj = extra.get("zimmer_verteilung_jahre") or {}
                 karte("Wohnen", "Leerstand nach Wohnungsgrösse", "Wohnungen",
                       reihe_v, "BFS, Leerwohnungszählung (data.stats.swiss)",
-                      url, hinweis=f"Leer stehende Wohnungen nach Zimmerzahl "
-                                   f"({neuestes}). Anteil am gesamten "
-                                   f"Leerstand.",
-                      extra={"typ": "verteilung", "verlauf_je_kategorie": vj})
+                      url, hinweis="Anzahl leer stehender Wohnungen je "
+                                   "Wohnungsgrösse am Stichtag 1. Juni.",
+                      extra={"typ": "verteilung", "verlauf_je_kategorie": vj,
+                             "stand": neuestes})
                 print(f"  Kennzahlen: Leerstand nach Zimmerzahl "
-                      f"({len(verteilung)} Kategorien, ohne Quote)")
+                      f"({len(verteilung)} Kategorien, Stand {neuestes}, "
+                      f"ohne Quote)")
     except Exception as e:
         fehler.append(f"Leerwohnungsziffer: {e}")
 

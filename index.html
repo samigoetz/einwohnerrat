@@ -1957,20 +1957,24 @@
           var hatVerlauf = k.verlauf_je_kategorie &&
             Object.keys(k.verlauf_je_kategorie).length > 0;
           karte.className = "kz-karte" + (hatVerlauf ? "" : " kz-nichtklickbar");
+          // Stand (Jahr) prominent zeigen, wie bei den Verlaufskarten
+          if (k.stand) {
+            var standZeile = document.createElement("div");
+            standZeile.className = "kz-veraenderung";
+            standZeile.textContent = "Stand " + k.stand;
+            karte.appendChild(standZeile);
+          }
           var vt = document.createElement("div");
           vt.className = "kz-vgl";
-          var summeV = 0;
-          (k.reihe || []).forEach(function (w) { summeV += w[1]; });
-          summeV = summeV || 1;
-          // Bei der Leerstandsquote ist der Wert bereits ein Prozentwert
-          // je Kategorie; dann nicht am Gesamtwert normieren.
+          // istQuote: der Wert ist bereits eine Prozentzahl je Kategorie
+          // (Leerstandsquote). Sonst zeigen wir die absoluten Zahlen, weil
+          // ein Anteil am Gesamtleerstand wenig aussagt.
           var istQuote = k.anteil_ist_wert === true;
-          var maxAnteil = 1;
+          var maxV = 1;
           (k.reihe || []).forEach(function (w) {
-            maxAnteil = Math.max(maxAnteil, istQuote ? w[1] : w[1] / summeV * 100);
+            maxV = Math.max(maxV, w[1]);
           });
           (k.reihe || []).forEach(function (w) {
-            var anteil = istQuote ? w[1] : w[1] / summeV * 100;
             var z = document.createElement("div");
             z.className = "kz-vgl-zeile";
             var lab = document.createElement("div");
@@ -1979,15 +1983,16 @@
             var bal = document.createElement("div");
             bal.className = "balken";
             var fuell = document.createElement("div");
-            fuell.style.width = Math.max(2, anteil / maxAnteil * 100) + "%";
+            fuell.style.width = Math.max(2, w[1] / maxV * 100) + "%";
             fuell.style.background = "#E2001A";
             bal.appendChild(fuell);
             z.appendChild(bal);
             var wt = document.createElement("div");
             wt.className = "wert";
             wt.textContent = istQuote
-              ? (Math.round(anteil * 100) / 100) + " %"
-              : Math.round(anteil) + " %";
+              ? (Math.round(w[1] * 100) / 100) + " %"
+              : kzZahl(w[1]) + (k.einheit && k.einheit !== "%"
+                                ? "\u00a0" + k.einheit : "");
             z.appendChild(wt);
             vt.appendChild(z);
           });
