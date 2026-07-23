@@ -33,6 +33,10 @@ jobs:
         run: pip install requests beautifulsoup4 pypdf pdfplumber openpyxl
 
       - name: Daten von neuhausen.ch holen
+        env:
+          # Zeitbudget fuer die Kennzahlen. Faellt ein Datenanbieter aus,
+          # wird der Rest uebersprungen statt den Lauf zu blockieren.
+          KENNZAHLEN_MINUTEN: "12"
         run: python neuhausen_daten.py
 
       - name: Neue Daten speichern
