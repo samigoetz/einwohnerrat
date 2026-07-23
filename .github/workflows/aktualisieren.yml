@@ -32,14 +32,48 @@ jobs:
       - name: Abhaengigkeiten installieren
         run: pip install requests beautifulsoup4 pypdf pdfplumber openpyxl
 
+      # SCHRITT 1: Website-Daten holen (schnell, ~30 Sekunden) OHNE die
+      # Kennzahlen. Diese Daten sind das Wichtigste und werden sofort
+      # danach gespeichert, damit sie auch dann ankommen, wenn der
+      # Kennzahlen-Teil spaeter scheitert oder der Runner abgeschaltet wird.
       - name: Daten von neuhausen.ch holen
-        env:
-          # Zeitbudget fuer die Kennzahlen. Faellt ein Datenanbieter aus,
-          # wird der Rest uebersprungen statt den Lauf zu blockieren.
-          KENNZAHLEN_MINUTEN: "12"
-        run: python neuhausen_daten.py
+        run: python neuhausen_daten.py --ohne-kennzahlen
 
-      - name: Neue Daten speichern
+      - name: Website-Daten sofort speichern
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add neuhausen_daten.js feed.xml presse_archiv.js
+          if git diff --staged --quiet; then
+            echo "Keine Aenderungen an den Website-Daten"
+          else
+            git commit -m "Daten aktualisiert"
+            for versuch in 1 2 3; do
+              git push && break
+              echo "Push abgewiesen, hole Fremdaenderungen ($versuch)"
+              mkdir -p /tmp/f1
+              for f in neuhausen_daten.js feed.xml presse_archiv.js; do
+                [ -f "$f" ] && cp "$f" "/tmp/f1/$f"
+              done
+              git fetch origin main && git reset --hard origin/main
+              for f in neuhausen_daten.js feed.xml presse_archiv.js; do
+                [ -f "/tmp/f1/$f" ] && cp "/tmp/f1/$f" "$f"
+              done
+              git add neuhausen_daten.js feed.xml presse_archiv.js
+              git diff --staged --quiet && break
+              git commit -m "Daten aktualisiert"
+            done
+          fi
+
+      # SCHRITT 2: Kennzahlen. Laeuft getrennt; scheitert er, sind die
+      # Website-Daten oben bereits sicher im Repository.
+      - name: Kennzahlen holen
+        continue-on-error: true
+        env:
+          KENNZAHLEN_MINUTEN: "8"
+        run: python neuhausen_daten.py --nur-kennzahlen
+
+      - name: Kennzahlen speichern
         # Laeuft AUCH, wenn der Datenlauf abgebrochen ist. Dank der
         # Zwischensicherung im Skript sind dann die bis dahin geholten
         # Daten vorhanden und werden uebernommen. Ohne dieses "always()"
@@ -48,7 +82,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          DATEIEN="neuhausen_daten.js feed.xml volltext.js presse_archiv.js kennzahlen.js"
+          DATEIEN="kennzahlen.js neuhausen_daten.js feed.xml presse_archiv.js"
           git add $DATEIEN
           git diff --staged --quiet && echo "Keine Aenderungen" && exit 0
           git commit -m "Daten aktualisiert"
