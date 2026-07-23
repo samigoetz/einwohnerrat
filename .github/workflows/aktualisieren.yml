@@ -40,6 +40,40 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add neuhausen_daten.js feed.xml volltext.js presse_archiv.js kennzahlen.js vergleich.js
-          git diff --staged --quiet || git commit -m "Daten aktualisiert"
-          git push
+          DATEIEN="neuhausen_daten.js feed.xml volltext.js presse_archiv.js kennzahlen.js vergleich.js"
+          git add $DATEIEN
+          git diff --staged --quiet && echo "Keine Aenderungen" && exit 0
+          git commit -m "Daten aktualisiert"
+
+          # Waehrend eines Laufs koennen Dateien hochgeladen worden sein.
+          # Dann weist GitHub den Push ab. Wir holen die Fremdaenderungen
+          # und setzen anschliessend unsere frisch berechneten Datendateien
+          # erneut, damit sie in jedem Fall gewinnen (sie sind aktueller).
+          for versuch in 1 2 3; do
+            if git push; then
+              echo "Push erfolgreich (Versuch $versuch)"
+              exit 0
+            fi
+            echo "Push abgewiesen, hole Fremdaenderungen (Versuch $versuch)"
+            # Unsere Fassung der Datendateien sichern
+            mkdir -p /tmp/frisch
+            for f in $DATEIEN; do
+              [ -f "$f" ] && cp "$f" "/tmp/frisch/$(basename $f)"
+            done
+            # Auf den Fernstand zuruecksetzen (verwirft unseren Commit,
+            # die Dateien haben wir gesichert)
+            git fetch origin main
+            git reset --hard origin/main
+            # Frische Daten zurueckschreiben und neu committen
+            for f in $DATEIEN; do
+              [ -f "/tmp/frisch/$(basename $f)" ] && cp "/tmp/frisch/$(basename $f)" "$f"
+            done
+            git add $DATEIEN
+            if git diff --staged --quiet; then
+              echo "Nach Abgleich keine Aenderungen mehr noetig"
+              exit 0
+            fi
+            git commit -m "Daten aktualisiert"
+          done
+          echo "Push nach drei Versuchen nicht moeglich"
+          exit 1
