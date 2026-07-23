@@ -67,7 +67,7 @@ GEMEINNUETZIG_ASSET = "https://dam-api.bfs.admin.ch/hub/api/dam/assets/16564299/
 # Die Dataflow-Kennung wird per Diagnose am echten System verifiziert.
 SDMX_BESTAND = "CH1.GWS,DF_GWS_WHG_1,1.0.0"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 30          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 31          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -560,8 +560,25 @@ def baue_volltext(vorstoesse, berichte, beschluesse) -> None:
              or cache[u].get("q") in ("fehler",)
              or (cache[u].get("q") == "ocr_fehlt" and kann_ocr)]
 
+    # Zeitbudget: Der Lauf beendet sich geordnet, bevor GitHub ihn abwuergt.
+    # Der Zwischenspeicher wird dabei gesichert, sodass der naechste Lauf
+    # genau dort weitermacht. Ueber VOLLTEXT_MINUTEN steuerbar.
+    import os as _os
+    try:
+        budget_min = float(_os.environ.get("VOLLTEXT_MINUTEN", "35"))
+    except ValueError:
+        budget_min = 35.0
+    _frist = time.monotonic() + budget_min * 60
+    abgebrochen = False
+
     neu = ocr_n = leer = fehler = 0
     for i, url in enumerate(offen, 1):
+        if time.monotonic() > _frist:
+            abgebrochen = True
+            print(f"  Volltext: Zeitbudget ({budget_min:.0f} Min.) erreicht, "
+                  f"{len(offen) - i + 1} Dokumente bleiben fuer den naechsten "
+                  f"Lauf.", flush=True)
+            break
         try:
             daten = _hole_pdf(url)
             text = _pdf_text(daten)
@@ -585,13 +602,17 @@ def baue_volltext(vorstoesse, berichte, beschluesse) -> None:
         except Exception:
             cache[url] = {"t": "", "q": "fehler"}
             fehler += 1
-        if i % 25 == 0 or i == len(offen):
-            print(f"  Volltext: {i}/{len(offen)} neue Dokumente verarbeitet")
+        if i % 10 == 0 or i == len(offen):
+            print(f"  Volltext: {i}/{len(offen)} neue Dokumente verarbeitet",
+                  flush=True)
         time.sleep(0.15)
 
     js = "window.NEUHAUSEN_VOLLTEXT = " + json.dumps(cache, ensure_ascii=False) + ";\n"
     VOLLTEXT_AUSGABE.write_text(js, encoding="utf-8")
 
+    if abgebrochen:
+        print("  Zwischenstand gesichert; der naechste Lauf macht dort weiter.",
+              flush=True)
     erfasst = sum(1 for e in cache.values() if e.get("q") in ("pdf", "ocr"))
     ohne = sum(1 for e in cache.values() if e.get("q") == "leer")
     ausstehend = sum(1 for e in cache.values() if e.get("q") == "ocr_fehlt")
@@ -2914,7 +2935,79 @@ def diagnose_wohnen_umwelt():
           "Vergleich Neuhausen/Kanton/Schweiz moeglich ist.")
 
 
+def nur_volltext() -> int:
+    """Eigenstaendiger Volltext-Lauf. Liest die bereits erzeugte
+    neuhausen_daten.js und verarbeitet deren Dokumente. So laeuft die
+    aufwendige PDF- und OCR-Verarbeitung getrennt vom schnellen Hauptlauf.
+
+    Vorteil: Der Hauptlauf bleibt kurz und liefert zuverlaessig die Daten;
+    bricht der Volltext-Lauf ab, sind die uebrigen Daten unberuehrt, und der
+    Zwischenspeicher sorgt dafuer, dass beim naechsten Mal dort weiter-
+    gearbeitet wird, wo aufgehoert wurde.
+    Aufruf: python neuhausen_daten.py --nur-volltext
+    """
+    import json as _json
+    from time import monotonic
+    start = monotonic()
+
+    def schritt(text):
+        print(f"[{monotonic() - start:6.1f}s] {text}", flush=True)
+
+    if not AUSGABE.exists():
+        print(f"FEHLER: {AUSGABE} fehlt. Zuerst den Hauptlauf ausfuehren.",
+              file=sys.stderr)
+        return 1
+
+    schritt("Lese vorhandene Daten")
+    roh = AUSGABE.read_text(encoding="utf-8")
+    # Format: window.NEUHAUSEN_DATEN = {...};
+    anfang = roh.find("{")
+    ende = roh.rfind("}")
+    if anfang < 0 or ende <= anfang:
+        print("FEHLER: Datenformat nicht erkannt.", file=sys.stderr)
+        return 1
+    try:
+        daten = _json.loads(roh[anfang:ende + 1])
+    except Exception as e:
+        print(f"FEHLER beim Lesen der Daten: {e}", file=sys.stderr)
+        return 1
+
+    vorstoesse = daten.get("vorstoesse", [])
+    berichte = daten.get("berichte", [])
+    beschluesse = daten.get("beschluesse", [])
+    schritt(f"Gefunden: {len(vorstoesse)} Vorstoesse, {len(berichte)} "
+            f"Berichte, {len(beschluesse)} Beschluesse")
+
+    schritt("Starte Volltext-Erfassung")
+    try:
+        baue_volltext(vorstoesse, berichte, beschluesse)
+    except Exception as e:
+        print(f"Volltext-Erfassung fehlgeschlagen: {e}", file=sys.stderr)
+        return 1
+    schritt("Fertig")
+    return 0
+
+
 def main():
+    # Ausgabe sofort schreiben, nicht puffern. Sonst erscheint im
+    # GitHub-Log minutenlang nichts und ein Abbruch hinterlaesst keine Spur.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+        sys.stderr.reconfigure(line_buffering=True)
+    except Exception:
+        pass
+
+    from time import monotonic
+    _start = monotonic()
+
+    def schritt(text):
+        """Fortschrittsmeldung mit Laufzeit, damit im Log sichtbar ist,
+        wo der Lauf gerade steht und was wie lange dauert."""
+        print(f"[{monotonic() - _start:6.1f}s] {text}", flush=True)
+
+    if "--nur-volltext" in sys.argv:
+        sys.exit(nur_volltext())
+
     if "--diagnose-mietzins" in sys.argv:
         diagnose_mietzins()
         return
@@ -2942,6 +3035,7 @@ def main():
     presse = []
     fehler = []
 
+    schritt("Start: Vorstoesse holen")
     for quelle in VORSTOSS_QUELLEN:
         try:
             html = hole(quelle["url"])
@@ -2952,6 +3046,7 @@ def main():
             fehler.append(f"{quelle['art']}: {e}")
             print(f"  {quelle['art']:16} FEHLER: {e}", file=sys.stderr)
 
+    schritt("Berichte & Antraege")
     try:
         html = hole(BA_URL)
         berichte = parse_berichte(html)
@@ -2986,6 +3081,7 @@ def main():
         print(f"  Presse FEHLER: {e}", file=sys.stderr)
 
     if "--ohne-kennzahlen" not in sys.argv:
+        schritt("Kennzahlen (BFS + Finanzen)")
         try:
             baue_kennzahlen()
         except Exception as e:
@@ -3015,13 +3111,20 @@ def main():
     feed = baue_feed(vorstoesse, berichte, beschluesse, aktuelles, presse)
     FEED_AUSGABE.write_text(feed, encoding="utf-8")
 
-    if "--ohne-volltext" not in sys.argv:
+    # Die Volltext-Erfassung laeuft standardmaessig NICHT mehr im Hauptlauf.
+    # Sie ist der mit Abstand aufwendigste Teil (PDF-Download, Textextraktion,
+    # teils Texterkennung) und hat den Lauf wiederholt so lange blockiert,
+    # dass GitHub ihn abbrach. Sie hat jetzt einen eigenen Workflow
+    # ("Volltext erfassen", Aufruf mit --nur-volltext). Mit --mit-volltext
+    # laesst sie sich hier weiterhin erzwingen.
+    if "--mit-volltext" in sys.argv:
+        schritt("Volltext-Erfassung (im Hauptlauf erzwungen)")
         try:
             baue_volltext(vorstoesse, berichte, beschluesse)
         except Exception as e:
             print(f"Volltext-Erfassung fehlgeschlagen: {e}", file=sys.stderr)
     else:
-        print("Volltext uebersprungen (--ohne-volltext)")
+        schritt("Volltext uebersprungen (eigener Workflow)")
 
     print(f"Geschrieben: {AUSGABE}  "
           f"({len(vorstoesse)} Vorstoesse, {len(berichte)} Berichte, "
