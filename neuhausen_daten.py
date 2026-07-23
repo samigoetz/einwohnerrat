@@ -50,7 +50,6 @@ PRESSE_ANZEIGE_TAGE = 365        # juengere Artikel stehen direkt auf der Seite
 PRESSE_LEAD_MAX_PRO_LAUF = 40    # so viele fehlende Leads werden pro Lauf geholt
 PRESSE_RUECKFUELL_AB_JAHR = 2020
 KENNZAHLEN_AUSGABE = BASIS / "kennzahlen.js"
-VERGLEICH_AUSGABE = BASIS / "vergleich.js"
 
 # Offizielle SDMX-Schnittstelle der Bundesstatistik (data.stats.swiss).
 # Leerwohnungszaehlung: absolute Anzahl leer stehender Wohnungen je Gemeinde,
@@ -68,7 +67,7 @@ GEMEINNUETZIG_ASSET = "https://dam-api.bfs.admin.ch/hub/api/dam/assets/16564299/
 # Die Dataflow-Kennung wird per Diagnose am echten System verifiziert.
 SDMX_BESTAND = "CH1.GWS,DF_GWS_WHG_1,1.0.0"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 29          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 30          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -125,7 +124,7 @@ FRAKTIONEN = {
     "Marcel Stettler": "Die Mitte",  # damals CVP
     "Rita Flück Hänzi": "Die Mitte", # damals CVP
     "Urs Hinnen": "ÖBS",
-    # --- Ergaenzungen gemaess Angaben SP Neuhausen ---
+    # --- Weitere Zuordnungen (manuell ergaenzt) ---
     "Nicole Hinder": "AL",
     "Adrian Schüpbach": "SVP",
     "Randy Ruh": "GLP",
@@ -2231,120 +2230,6 @@ def diagnose_leerwohnung():
 
 
 
-# Die 20 der Neuhausen (11'834 Ew.) aehnlichsten Gemeinden, aus dem
-# Vergleichsgemeinden-Lauf. Name muss dem BFS-Wuerfel-Text entsprechen,
-# damit _stattab_reihe die Region findet.
-VERGLEICH_NACHBARN = [
-    "Romanshorn", "Hinwil", "Männedorf", "Belp", "Suhr", "Worb",
-    "Zollikofen", "Ittigen", "Oberwil (BL)", "Möhlin", "Lenzburg",
-    "Aesch (BL)", "Bernex", "Sursee", "Val de Bagnes", "Le Locle",
-    "Maur", "Sarnen", "Davos", "Münchenbuchsee",
-]
-
-
-def _kennzahl_einzelwert(cube, fest=None, festlegungen=None, region=None):
-    """Holt den neuesten Einzelwert einer Kennzahl fuer eine Gemeinde.
-    Nutzt dieselbe robuste _stattab_reihe-Logik wie fuer Neuhausen und
-    gibt nur den letzten (aktuellsten) Wert zurueck, oder None."""
-    try:
-        reihe, _ = _stattab_reihe(cube, festlegungen or [],
-                                  region=region, fest=fest or {})
-        if reihe:
-            return reihe[-1][1], reihe[-1][0]   # (wert, jahr)
-    except Exception:
-        pass
-    return None, None
-
-
-def baue_vergleichsdaten() -> None:
-    """Baut die Vergleichsdatei: fuer Neuhausen und die 20 aehnlichsten
-    Gemeinden je die wichtigsten BFS-Kennzahlen als aktueller Einzelwert.
-    Schreibt vergleich.js. Bei fehlenden Einzelwerten bleibt das Feld leer,
-    nie geraten."""
-    import json
-
-    # Definition der vergleichbaren Kennzahlen (Einzelwert je Gemeinde).
-    # Jede: key, Anzeigename, Einheit, Berechnung.
-    bev_fest = {
-        "Staatsangehörigkeit (Kategorie)":
-            ["staatsangehörigkeit (kategorie) - total"],
-        "Geschlecht": ["geschlecht - total"],
-        "Demografische Komponente": ["bestand am 31. dezember"],
-    }
-    auslaender_ausland = {
-        "Staatsangehörigkeit (Kategorie)": ["ausland"],
-        "Geschlecht": ["geschlecht - total"],
-        "Demografische Komponente": ["bestand am 31. dezember"],
-    }
-
-    def kennzahlen_fuer(region):
-        werte = {}
-        # Bevoelkerung (Total)
-        w, j = _kennzahl_einzelwert("px-x-0102020000_201", fest=bev_fest,
-                                    region=region)
-        if w is not None:
-            werte["bevoelkerung"] = {"wert": round(w), "jahr": j}
-        # Auslaenderanteil = Ausland / Total * 100
-        w_total, _ = _kennzahl_einzelwert("px-x-0102020000_201", fest=bev_fest,
-                                          region=region)
-        w_ausl, ja = _kennzahl_einzelwert("px-x-0102020000_201",
-                                          fest=auslaender_ausland,
-                                          region=region)
-        if w_total and w_ausl is not None and w_total > 0:
-            werte["auslaenderanteil"] = {
-                "wert": round(w_ausl / w_total * 100, 1), "jahr": ja}
-        # Beschaeftigte (Total)
-        w, j = _kennzahl_einzelwert("px-x-0602010000_102", ["beschäftigte"],
-                                    region=region)
-        if w is not None:
-            werte["beschaeftigte"] = {"wert": round(w), "jahr": j}
-        # Neu erstellte Wohnungen
-        w, j = _kennzahl_einzelwert(
-            "px-x-0904030000_107",
-            fest={"Gebäudetyp": ["gebäudetyp - alle", "gebäudetyp - total"]},
-            region=region)
-        if w is not None:
-            werte["neubau"] = {"wert": round(w), "jahr": j}
-        return werte
-
-    gemeinden = {}
-    # Neuhausen zuerst
-    print("  Vergleich: Neuhausen ...")
-    gemeinden["Neuhausen am Rheinfall"] = kennzahlen_fuer(
-        "neuhausen am rheinfall")
-    for name in VERGLEICH_NACHBARN:
-        print(f"  Vergleich: {name} ...")
-        # Regionssuche im Wuerfel ist case-insensitiv und nimmt Teilstrings;
-        # Klammerzusaetze wie "(BL)" stehen so auch im BFS-Text.
-        werte = kennzahlen_fuer(name.lower())
-        if werte:
-            gemeinden[name] = werte
-
-    # Kennzahl-Metadaten fuer die Anzeige
-    meta = {
-        "bevoelkerung": {"name": "Bevölkerung", "einheit": "",
-                         "richtung": "neutral"},
-        "auslaenderanteil": {"name": "Ausländer:innenanteil", "einheit": "%",
-                             "richtung": "neutral"},
-        "beschaeftigte": {"name": "Beschäftigte", "einheit": "",
-                          "richtung": "neutral"},
-        "neubau": {"name": "Neu erstellte Wohnungen", "einheit": "Wohnungen",
-                   "richtung": "neutral"},
-    }
-
-    daten = {
-        "referenz": "Neuhausen am Rheinfall",
-        "kennzahlen_meta": meta,
-        "gemeinden": gemeinden,
-        "quelle": "BFS, STAT-TAB",
-    }
-    inhalt = "window.VERGLEICH_DATEN = " + json.dumps(
-        daten, ensure_ascii=False, indent=1) + ";\n"
-    VERGLEICH_AUSGABE.write_text(inhalt, encoding="utf-8")
-    print(f"Geschrieben: {VERGLEICH_AUSGABE}  "
-          f"({len(gemeinden)} Gemeinden, {len(meta)} Kennzahlen)")
-
-
 def baue_kennzahlen() -> None:
     # Zwischenspeicher: hoechstens einmal pro Woche neu abfragen
     if KENNZAHLEN_AUSGABE.exists():
@@ -2450,7 +2335,8 @@ def baue_kennzahlen() -> None:
             "px-x-0904030000_107", [],
             fest={"Gebäudetyp": ["gebäudetyp - alle", "gebäudetyp - total"]})
         karte("Wohnen", "Neu erstellte Wohnungen", "Wohnungen",
-              reihe, "BFS, STAT-TAB", url)
+              reihe, "BFS, STAT-TAB", url,
+              extra={"jahresereignis": True})
         print(f"  Kennzahlen: Neubau-Wohnungen {reihe[0][0]}\u2013"
               f"{reihe[-1][0]} ({len(reihe)} Werte, aktuell {reihe[-1][1]})")
     except Exception as e:
@@ -2619,47 +2505,6 @@ def baue_kennzahlen() -> None:
     except Exception as e:
         fehler.append(f"Mietpreis-Hinweis: {e}")
 
-    # --- Vergleich mit Kanton und Schweiz (Wachstum in Prozent) ---
-    for name, cube, festl, festd, ab_jahr in (
-            ("Bevölkerungswachstum seit 2015",
-             "px-x-0102020000_201", [], BEV_FEST, 2015),
-            ("Beschäftigungswachstum seit 2011",
-             "px-x-0602010000_102", ["beschäftigte"], None, 2011)):
-        try:
-            werte = []
-            url = ""
-            for label, region in (("Neuhausen", "neuhausen am rheinfall"),
-                                  ("Kanton SH", "- schaffhausen"),
-                                  ("Schweiz", "schweiz")):
-                try:
-                    reihe, url = _stattab_reihe(cube, festl, region=region,
-                                                fest=festd)
-                    w = _wachstum(reihe, ab_jahr)
-                    if w is not None:
-                        werte.append([label, w])
-                except Exception:
-                    continue
-            if werte and werte[0][0] == "Neuhausen" and len(werte) >= 2:
-                for b in bereiche:
-                    if b["titel"] == "Vergleich":
-                        ziel = b
-                        break
-                else:
-                    ziel = {"titel": "Vergleich", "karten": []}
-                    bereiche.append(ziel)
-                ziel["karten"].append({
-                    "typ": "vergleich", "name": name, "einheit": "%",
-                    "werte": werte, "reihe": [],
-                    "quelle": "BFS, STAT-TAB", "quelleUrl": url,
-                    "hinweis": "Veränderung in Prozent im gleichen Zeitraum",
-                })
-                print(f"  Kennzahlen: {name}: "
-                      + ", ".join(f"{l} {w:+.1f}%" for l, w in werte))
-            else:
-                fehler.append(f"{name}: zu wenige Regionen lieferbar")
-        except Exception as e:
-            fehler.append(f"{name}: {e}")
-
     # --- Stimmberechtigte im Verhaeltnis zur Bevoelkerung (BFS) ---
     # Wichtig: Stimmberechtigt = Schweizer ab 18. Die Quote widerspiegelt
     # daher auch Kinder- und Auslaenderanteil; das wird auf der Karte erklaert.
@@ -2744,6 +2589,29 @@ def baue_kennzahlen() -> None:
 
     jetzt = datetime.now(_ZEITZONE) if _ZEITZONE else datetime.now()
     from datetime import timedelta
+
+    # Karten je Bereich in eine sinnvolle Lesereihenfolge bringen.
+    # Nicht aufgefuehrte Karten behalten ihre urspruengliche Reihenfolge und
+    # kommen ans Ende des jeweiligen Bereichs.
+    KARTEN_REIHENFOLGE = {
+        "Wohnen": [
+            "Leerwohnungsziffer",
+            "Leer stehende Wohnungen",
+            "Leerstand nach Wohnungsgrösse",
+            "Wohnungsbestand",
+            "Neu erstellte Wohnungen",
+            "Mietpreise",
+        ],
+    }
+    for bereich in bereiche:
+        wunsch = KARTEN_REIHENFOLGE.get(bereich["titel"])
+        if not wunsch:
+            continue
+        def _rang(karte, _w=wunsch):
+            name = karte.get("name", "")
+            return _w.index(name) if name in _w else len(_w)
+        bereich["karten"] = sorted(bereich["karten"], key=_rang)
+
     obj = {
         "version": KENNZAHLEN_VERSION,
         "stand": jetzt.strftime("%d.%m.%Y %H:%M"),
@@ -3122,10 +2990,6 @@ def main():
             baue_kennzahlen()
         except Exception as e:
             print(f"  Kennzahlen FEHLER: {e}", file=sys.stderr)
-        try:
-            baue_vergleichsdaten()
-        except Exception as e:
-            print(f"  Vergleichsdaten FEHLER: {e}", file=sys.stderr)
     else:
         print("Kennzahlen uebersprungen (--ohne-kennzahlen)")
 
