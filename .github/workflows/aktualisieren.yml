@@ -2,7 +2,7 @@ name: Daten aktualisieren
 
 on:
   schedule:
-    - cron: "*/15 * * * *"  # alle 15 Minuten
+    - cron: "7 * * * *"     # stuendlich (Minute 7, entzerrt die Last)
   workflow_dispatch:        # erlaubt manuelles Starten per Knopf
 
 permissions:
@@ -19,7 +19,7 @@ concurrency:
 jobs:
   aktualisieren:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 60
     steps:
       - name: Repository holen
         uses: actions/checkout@v5
@@ -42,7 +42,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          DATEIEN="neuhausen_daten.js feed.xml volltext.js presse_archiv.js kennzahlen.js vergleich.js"
+          DATEIEN="neuhausen_daten.js feed.xml volltext.js presse_archiv.js kennzahlen.js"
           git add $DATEIEN
           git diff --staged --quiet && echo "Keine Aenderungen" && exit 0
           git commit -m "Daten aktualisiert"
