@@ -375,6 +375,22 @@
   }
   .kz-dialog-wasbedeutet { font-size: 13px; line-height: 1.5; color: var(--grau); margin-bottom: 18px; padding: 10px 12px; background: #FAFAF8; border-left: 3px solid var(--rot); }
   .kz-graph { width: 100%; }
+  .kz-verlauf-legende { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 14px; align-items: center; }
+  .kz-vl-eintrag {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 13px; padding: 5px 11px; border: 1.5px solid #ccc;
+    background: var(--weiss); color: #999; cursor: pointer; font-family: inherit;
+    opacity: 0.55; transition: opacity 0.12s;
+  }
+  .kz-vl-eintrag.aktiv { color: var(--schwarz); opacity: 1; font-weight: 700; }
+  .kz-vl-punkt { display: inline-block; width: 11px; height: 11px; border-radius: 50%; }
+  .kz-vl-eintrag:not(.aktiv) .kz-vl-punkt { opacity: 0.35; }
+  .kz-vl-alle {
+    font-size: 12px; padding: 5px 10px; border: 1.5px solid var(--schwarz);
+    background: var(--schwarz); color: var(--weiss); cursor: pointer;
+    font-family: inherit; margin-right: 4px;
+  }
+  .kz-vl-alle:hover { background: #333; }
   .kz-darstellung-schalter { display: flex; gap: 6px; margin: 4px 0 12px; }
   .kz-dstl {
     font-size: 13px; padding: 5px 14px; border: 1.5px solid var(--schwarz);
@@ -1661,87 +1677,164 @@
       " bis " + jahre[jahre.length - 1];
     dialog.appendChild(unter);
 
-    // Farben je Zimmerkategorie (aufsteigend, rot-abgestuft)
-    var farben = ["#F0997B", "#E24B4A", "#E2001A", "#A32D2D",
-                  "#712B13", "#4A1B0C"];
-    var ns = "http://www.w3.org/2000/svg";
-    var B = 700, H = 380, links = 46, rechts = 90, oben = 16, unten = 34;
-    var iB = B - links - rechts, iH = H - oben - unten;
-    var alleWerte = [];
-    kategorien.forEach(function (kat) {
-      jahre.forEach(function (j) {
-        if (vj[kat][j] !== undefined) alleWerte.push(vj[kat][j]);
-      });
-    });
-    var minW = 0, maxW = Math.max.apply(null, alleWerte) || 1;
-    var spanne = (maxW - minW) || 1;
-    function px(i) { return links + (jahre.length > 1 ? i / (jahre.length - 1) * iB : iB / 2); }
-    function py(w) { return oben + iH - (w - minW) / spanne * iH; }
+    // Farben je Zimmerkategorie: gut unterscheidbar, SP-Rot als Leitfarbe
+    var farben = ["#E2001A", "#1D5FA8", "#1D7A3E", "#C8860D",
+                  "#7B3FA0", "#6E6E6E"];
+    // Sichtbarkeit je Kategorie (alle anfangs sichtbar)
+    var sichtbar = {};
+    kategorien.forEach(function (kat) { sichtbar[kat] = true; });
 
-    var svg = document.createElementNS(ns, "svg");
-    svg.setAttribute("viewBox", "0 0 " + B + " " + H);
-    svg.setAttribute("class", "kz-mehrlinien");
-
-    // Hilfslinien + Y-Achse
-    for (var s = 0; s <= 4; s++) {
-      var wv = minW + spanne * s / 4;
-      var y = py(wv);
-      var hl = document.createElementNS(ns, "line");
-      hl.setAttribute("x1", links); hl.setAttribute("x2", B - rechts);
-      hl.setAttribute("y1", y.toFixed(1)); hl.setAttribute("y2", y.toFixed(1));
-      hl.setAttribute("stroke", "#E5E5E2"); hl.setAttribute("stroke-width", "1");
-      svg.appendChild(hl);
-      var yl = document.createElementNS(ns, "text");
-      yl.setAttribute("x", links - 8); yl.setAttribute("y", (y + 4).toFixed(1));
-      yl.setAttribute("text-anchor", "end");
-      yl.setAttribute("font-size", "12"); yl.setAttribute("fill", "#6E6E6E");
-      yl.textContent = k.verlauf_einheit === "%"
-        ? (Math.round(wv * 100) / 100) + "%"
-        : Math.round(wv);
-      svg.appendChild(yl);
-    }
-    // X-Achse
-    var schritt = Math.max(1, Math.ceil(jahre.length / 8));
-    jahre.forEach(function (j, i) {
-      if (i % schritt !== 0 && i !== jahre.length - 1) return;
-      var xt = document.createElementNS(ns, "text");
-      xt.setAttribute("x", px(i).toFixed(1)); xt.setAttribute("y", H - unten + 20);
-      xt.setAttribute("text-anchor", "middle");
-      xt.setAttribute("font-size", "12"); xt.setAttribute("fill", "#6E6E6E");
-      xt.textContent = j;
-      svg.appendChild(xt);
-    });
-    // Eine Linie je Zimmerkategorie
+    // --- Legende zum Ein- und Ausblenden ---
+    var legende = document.createElement("div");
+    legende.className = "kz-verlauf-legende";
+    var alleKnopf = document.createElement("button");
+    alleKnopf.className = "kz-vl-alle";
+    alleKnopf.textContent = "Alle zeigen";
+    legende.appendChild(alleKnopf);
+    var knoepfe = {};
     kategorien.forEach(function (kat, ki) {
-      var farbe = farben[ki % farben.length];
-      var pkt = [];
-      jahre.forEach(function (j, i) {
-        if (vj[kat][j] !== undefined) pkt.push([px(i), py(vj[kat][j])]);
+      var b = document.createElement("button");
+      b.className = "kz-vl-eintrag aktiv";
+      b.style.borderColor = farben[ki % farben.length];
+      var punkt = document.createElement("span");
+      punkt.className = "kz-vl-punkt";
+      punkt.style.background = farben[ki % farben.length];
+      b.appendChild(punkt);
+      b.appendChild(document.createTextNode(kat));
+      b.addEventListener("click", function () {
+        sichtbar[kat] = !sichtbar[kat];
+        b.classList.toggle("aktiv", sichtbar[kat]);
+        zeichne();
       });
-      if (pkt.length < 2) return;
-      var poly = document.createElementNS(ns, "polyline");
-      poly.setAttribute("points", pkt.map(function (p) {
-        return p[0].toFixed(1) + "," + p[1].toFixed(1);
-      }).join(" "));
-      poly.setAttribute("fill", "none");
-      poly.setAttribute("stroke", farbe);
-      poly.setAttribute("stroke-width", "2.5");
-      svg.appendChild(poly);
-      // Label am Ende
-      var letzte = pkt[pkt.length - 1];
-      var lb = document.createElementNS(ns, "text");
-      lb.setAttribute("x", (letzte[0] + 6).toFixed(1));
-      lb.setAttribute("y", (letzte[1] + 4).toFixed(1));
-      lb.setAttribute("font-size", "12"); lb.setAttribute("fill", farbe);
-      lb.setAttribute("font-weight", "700");
-      lb.textContent = kat;
-      svg.appendChild(lb);
+      knoepfe[kat] = b;
+      legende.appendChild(b);
     });
+    alleKnopf.addEventListener("click", function () {
+      kategorien.forEach(function (kat) {
+        sichtbar[kat] = true;
+        knoepfe[kat].classList.add("aktiv");
+      });
+      zeichne();
+    });
+    dialog.appendChild(legende);
 
     var graph = document.createElement("div");
     graph.className = "kz-graph";
-    graph.appendChild(svg);
     dialog.appendChild(graph);
+
+    function zeichne() {
+      var aktive = kategorien.filter(function (kat) { return sichtbar[kat]; });
+      graph.innerHTML = "";
+      if (!aktive.length) {
+        var leer = document.createElement("p");
+        leer.className = "leer";
+        leer.textContent = "Keine Wohnungsgrösse ausgewählt.";
+        graph.appendChild(leer);
+        return;
+      }
+      var ns = "http://www.w3.org/2000/svg";
+      var B = 700, H = 380, links = 52, rechts = 96, oben = 16, unten = 34;
+      var iB = B - links - rechts, iH = H - oben - unten;
+      // Skala nur über die sichtbaren Linien: dadurch werden kleine
+      // Werte lesbar, sobald grosse Kategorien ausgeblendet werden.
+      var alleWerte = [];
+      aktive.forEach(function (kat) {
+        jahre.forEach(function (j) {
+          if (vj[kat][j] !== undefined) alleWerte.push(vj[kat][j]);
+        });
+      });
+      var minW = 0, maxW = Math.max.apply(null, alleWerte) || 1;
+      var spanne = (maxW - minW) || 1;
+      function px(i) {
+        return links + (jahre.length > 1 ? i / (jahre.length - 1) * iB : iB / 2);
+      }
+      function py(w) { return oben + iH - (w - minW) / spanne * iH; }
+
+      var svg = document.createElementNS(ns, "svg");
+      svg.setAttribute("viewBox", "0 0 " + B + " " + H);
+      svg.setAttribute("class", "kz-mehrlinien");
+
+      for (var s = 0; s <= 4; s++) {
+        var wv = minW + spanne * s / 4;
+        var y = py(wv);
+        var hl = document.createElementNS(ns, "line");
+        hl.setAttribute("x1", links); hl.setAttribute("x2", B - rechts);
+        hl.setAttribute("y1", y.toFixed(1)); hl.setAttribute("y2", y.toFixed(1));
+        hl.setAttribute("stroke", "#E5E5E2"); hl.setAttribute("stroke-width", "1");
+        svg.appendChild(hl);
+        var yl = document.createElementNS(ns, "text");
+        yl.setAttribute("x", links - 8); yl.setAttribute("y", (y + 4).toFixed(1));
+        yl.setAttribute("text-anchor", "end");
+        yl.setAttribute("font-size", "12"); yl.setAttribute("fill", "#6E6E6E");
+        yl.textContent = k.verlauf_einheit === "%"
+          ? (Math.round(wv * 100) / 100) + "%"
+          : Math.round(wv);
+        svg.appendChild(yl);
+      }
+      var schritt = Math.max(1, Math.ceil(jahre.length / 8));
+      jahre.forEach(function (j, i) {
+        if (i % schritt !== 0 && i !== jahre.length - 1) return;
+        var xt = document.createElementNS(ns, "text");
+        xt.setAttribute("x", px(i).toFixed(1)); xt.setAttribute("y", H - unten + 20);
+        xt.setAttribute("text-anchor", "middle");
+        xt.setAttribute("font-size", "12"); xt.setAttribute("fill", "#6E6E6E");
+        xt.textContent = j;
+        svg.appendChild(xt);
+      });
+
+      // Endpunkte sammeln, um überlappende Label zu entzerren
+      var labelPositionen = [];
+      aktive.forEach(function (kat) {
+        var ki = kategorien.indexOf(kat);
+        var farbe = farben[ki % farben.length];
+        var pkt = [];
+        jahre.forEach(function (j, i) {
+          if (vj[kat][j] !== undefined) pkt.push([px(i), py(vj[kat][j]), j, vj[kat][j]]);
+        });
+        if (pkt.length < 2) return;
+        var poly = document.createElementNS(ns, "polyline");
+        poly.setAttribute("points", pkt.map(function (p) {
+          return p[0].toFixed(1) + "," + p[1].toFixed(1);
+        }).join(" "));
+        poly.setAttribute("fill", "none");
+        poly.setAttribute("stroke", farbe);
+        poly.setAttribute("stroke-width", "2.5");
+        svg.appendChild(poly);
+        // Punkte mit Tooltip, damit Werte ablesbar sind
+        pkt.forEach(function (p) {
+          var c = document.createElementNS(ns, "circle");
+          c.setAttribute("cx", p[0].toFixed(1)); c.setAttribute("cy", p[1].toFixed(1));
+          c.setAttribute("r", jahre.length > 20 ? "2" : "3");
+          c.setAttribute("fill", farbe);
+          var t = document.createElementNS(ns, "title");
+          t.textContent = kat + " " + p[2] + ": " + p[3] +
+            (k.verlauf_einheit === "%" ? "%" : "");
+          c.appendChild(t);
+          svg.appendChild(c);
+        });
+        labelPositionen.push({ kat: kat, farbe: farbe,
+                               x: pkt[pkt.length - 1][0],
+                               y: pkt[pkt.length - 1][1] });
+      });
+      // Label entzerren: mindestens 14 px Abstand
+      labelPositionen.sort(function (a, b) { return a.y - b.y; });
+      for (var i = 1; i < labelPositionen.length; i++) {
+        if (labelPositionen[i].y - labelPositionen[i - 1].y < 14) {
+          labelPositionen[i].y = labelPositionen[i - 1].y + 14;
+        }
+      }
+      labelPositionen.forEach(function (lp) {
+        var lb = document.createElementNS(ns, "text");
+        lb.setAttribute("x", (lp.x + 8).toFixed(1));
+        lb.setAttribute("y", (lp.y + 4).toFixed(1));
+        lb.setAttribute("font-size", "12"); lb.setAttribute("fill", lp.farbe);
+        lb.setAttribute("font-weight", "700");
+        lb.textContent = lp.kat;
+        svg.appendChild(lb);
+      });
+      graph.appendChild(svg);
+    }
+    zeichne();
 
     if (k.hinweis) {
       var hw = document.createElement("div");
@@ -1769,6 +1862,7 @@
     });
     document.addEventListener("keydown", aufEsc);
   }
+
 
   function rendereKZ() {
     var box = $("kz-bereich");
