@@ -2012,30 +2012,100 @@ def diagnose_mietzins():
     """Prueft, ob der City-Statistics-Netto-Mietzins fuer Neuhausen
     verwertbare Werte liefert. Aufruf: --diagnose-mietzins"""
     print("===== Netto-Mietzins-Diagnose (City Statistics) =====\n")
+
+    # 1) Struktur roh ansehen: welche Namensraeume und Codelisten kommen?
+    print("--- Strukturabfrage (roh) ---")
+    struktur_url = ("https://disseminate.stats.swiss/rest/v2/structure/"
+                    "dataflow/CH1.CITYSTAT/DF_CITYSTAT_CHURB_2/+"
+                    "?references=all&detail=referencepartial")
     try:
-        dims, codelisten = _sdmx_struktur_dims_codelisten(SDMX_CITYSTAT)
-        print(f"Dimensionen: {[d['id'] for d in dims]}")
-        for d in dims:
-            codes = codelisten.get(d["codelist"], {})
-            treffer = {c: n for c, n in codes.items()
-                       if "neuhausen" in (n or "").casefold() or "2937" in c}
-            info = f"{len(codes)} Codes"
-            if treffer:
-                info += f", Neuhausen: {list(treffer.items())[:2]}"
-            print(f"  Dim {d['id']} (CL {d['codelist']}): {info}")
-        schluessel, geo, gcode = _sdmx_gemeinde_schluessel(dims, codelisten)
-        print(f"\nGemeindedimension: {geo}, Code: {gcode}")
-        print(f"Schluessel: {schluessel}")
-        reihe, url, guete = _netto_mietzins()
-        print(f"\nURL: {url}")
-        print(f"Verwertbare Jahre: {len(reihe)} (Guete {guete:.0%})")
-        if reihe:
-            print(f"Reihe (CHF/m2/Monat): {reihe}")
-            print(f"Aktuell: {reihe[-1][1]} CHF/m2 ({reihe[-1][0]})")
+        r = requests.get(struktur_url, headers=HEADERS, timeout=90)
+        print(f"  HTTP {r.status_code}, {len(r.content):,} Bytes")
+        txt = r.content.decode("utf-8", "replace")
+        import re as _re
+        # Welche Namensraeume nutzt die Antwort?
+        ns_treffer = sorted(set(_re.findall(r'xmlns:(\w+)="([^"]+)"', txt)))
+        for praefix, url_ns in ns_treffer[:8]:
+            print(f"  Namensraum {praefix}: {url_ns[:70]}")
+        # Wie viele Codelist- und Code-Elemente gibt es ueberhaupt?
+        print(f"  'Codelist'-Vorkommen: {txt.count('Codelist')}")
+        print(f"  'Code '-Vorkommen:    {txt.count('<Code ') + txt.count(':Code ')}")
+        # Kommt Neuhausen im Strukturtext vor?
+        if "euhausen" in txt:
+            for m in _re.finditer(r'.{80}[Nn]euhausen.{80}', txt):
+                print(f"  NEUHAUSEN gefunden: ...{m.group(0)[:170]}...")
+                break
         else:
-            print("Keine verwertbaren Werte (evtl. alle unterdrueckt).")
+            print("  Neuhausen kommt in der Struktur NICHT vor.")
     except Exception as e:
-        print(f"FEHLGESCHLAGEN: {e}")
+        print(f"  FEHLER: {e}")
+
+    # 2) Datenabfrage ohne Regionsfilter: welche Regionen liefert der Wuerfel?
+    print("\n--- Datenabfrage OHNE Regionsfilter (Stichprobe) ---")
+    url = (f"{SDMX_BASIS}/{SDMX_CITYSTAT}/....A"
+           f"?dimensionAtObservation=AllDimensions&format=csvfile"
+           f"&startPeriod=2023&endPeriod=2024")
+    try:
+        kopf = dict(HEADERS)
+        kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
+        r = requests.get(url, headers=kopf, timeout=120)
+        print(f"  HTTP {r.status_code}, {len(r.content):,} Bytes")
+        if r.status_code < 400 and len(r.content) > 100:
+            import csv as _csv
+            import io as _io
+            text = r.content.decode("utf-8-sig", "replace")
+            zeilen = list(_csv.DictReader(_io.StringIO(text)))
+            print(f"  Zeilen: {len(zeilen)}")
+            if zeilen:
+                print(f"  Spalten: {list(zeilen[0].keys())[:12]}")
+                # Welche Raum-Codes gibt es?
+                raum_spalte = None
+                for k in zeilen[0].keys():
+                    if k and "RAUM" in k.upper():
+                        raum_spalte = k
+                        break
+                if raum_spalte:
+                    codes = {}
+                    for z in zeilen:
+                        c = (z.get(raum_spalte) or "").strip()
+                        if c and c not in codes:
+                            # Klartextspalte suchen
+                            name = ""
+                            for k, v in z.items():
+                                if k and k != raum_spalte and v and \
+                                        not k.isupper() and len(str(v)) > 3:
+                                    name = str(v)[:40]
+                                    break
+                            codes[c] = name
+                    print(f"  Verschiedene Raum-Codes: {len(codes)}")
+                    print(f"  Erste 12: {list(codes.items())[:12]}")
+                    if "2937" in codes:
+                        print(f"  -> 2937 VORHANDEN: {codes['2937']}")
+                    else:
+                        print("  -> 2937 NICHT vorhanden!")
+                        # Neuhausen per Name suchen
+                        for c, n in codes.items():
+                            if "euhausen" in n:
+                                print(f"     Aber Neuhausen unter Code {c}: {n}")
+                # Mietzins-Zeilen?
+                miet = [z for z in zeilen
+                        if "miet" in " ".join(str(v) for v in z.values()).lower()]
+                print(f"  Zeilen mit 'miet': {len(miet)}")
+                for z in miet[:3]:
+                    print(f"    {dict(list(z.items())[:8])}")
+    except Exception as e:
+        print(f"  FEHLER: {e}")
+
+    # 3) Der bisherige Weg (zur Kontrolle)
+    print("\n--- Bisheriger Abruf mit Filter 2937 ---")
+    try:
+        reihe, url2, guete = _netto_mietzins()
+        print(f"  URL: {url2}")
+        print(f"  Verwertbare Jahre: {len(reihe)} (Guete {guete:.0%})")
+        if reihe:
+            print(f"  Reihe: {reihe}")
+    except Exception as e:
+        print(f"  FEHLGESCHLAGEN: {e}")
     print("\n===== Ende Mietzins-Diagnose =====")
 
 
