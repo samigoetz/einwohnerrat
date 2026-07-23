@@ -8,10 +8,12 @@ on:
 permissions:
   contents: write
 
-# Nie zwei Laeufe gleichzeitig (wichtig, weil der allererste Lauf
-# wegen der Volltext-Erfassung lange dauert)
+# Nie zwei gleichartige Laeufe gleichzeitig. Manuelle Starts bekommen eine
+# EIGENE Gruppe, damit sie nicht mit den Viertelstunden-Laeufen um denselben
+# Platz konkurrieren. Vorher wurde ein wartender manueller Lauf regelmaessig
+# vom naechsten automatischen Lauf verdraengt ("canceled").
 concurrency:
-  group: daten-aktualisieren
+  group: daten-aktualisieren-${{ github.event_name }}
   cancel-in-progress: false
 
 jobs:
