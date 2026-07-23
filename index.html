@@ -281,6 +281,15 @@
   .kz-karte { border: 2px solid var(--schwarz); padding: 14px 16px 12px; cursor: pointer; transition: background 0.1s ease; }
   .kz-karte:hover { background: #FAFAF8; }
   .kz-karte.kz-nichtklickbar { cursor: default; }
+  .kz-hinweis-kern {
+    font-size: 15px; font-weight: 700; line-height: 1.5; color: var(--schwarz);
+    border-left: 4px solid var(--rot); padding: 8px 0 8px 12px; margin: 4px 0 14px;
+  }
+  .kz-hinweis-punkt { margin-bottom: 13px; }
+  .kz-hp-text { font-size: 14px; line-height: 1.55; color: #333; }
+  .kz-hp-quelle { font-size: 12px; color: #888; margin-top: 3px; }
+  .kz-hp-quelle a { color: var(--rot); text-decoration: none; }
+  .kz-hp-quelle a:hover { text-decoration: underline; }
   .kz-karte.kz-nichtklickbar:hover { background: none; }
   .kz-mehr { font-size: 10.5px; font-weight: 700; color: var(--rot); margin-top: 9px; text-transform: uppercase; letter-spacing: 0.05em; }
   .kz-beurteilung {
@@ -1909,6 +1918,48 @@
           name.appendChild(info);
         }
         karte.appendChild(name);
+        if (k.typ === "hinweis") {
+          // Karte ohne eigene Zahlenreihe: erklaert die Datenlage und nennt
+          // die belegten Fakten mit ihren Quellen.
+          karte.className = "kz-karte kz-nichtklickbar";
+          if (k.kernaussage) {
+            var ka = document.createElement("div");
+            ka.className = "kz-hinweis-kern";
+            ka.textContent = k.kernaussage;
+            karte.appendChild(ka);
+          }
+          (k.punkte || []).forEach(function (p) {
+            var zeile = document.createElement("div");
+            zeile.className = "kz-hinweis-punkt";
+            var txt = document.createElement("div");
+            txt.className = "kz-hp-text";
+            txt.textContent = p.text;
+            zeile.appendChild(txt);
+            if (p.quelle) {
+              var qz = document.createElement("div");
+              qz.className = "kz-hp-quelle";
+              if (p.url) {
+                var a = document.createElement("a");
+                a.href = p.url; a.target = "_blank"; a.rel = "noopener";
+                a.textContent = p.quelle;
+                qz.appendChild(document.createTextNode("Quelle: "));
+                qz.appendChild(a);
+              } else {
+                qz.textContent = "Quelle: " + p.quelle;
+              }
+              zeile.appendChild(qz);
+            }
+            karte.appendChild(zeile);
+          });
+          if (k.hinweis) {
+            var hh = document.createElement("div");
+            hh.className = "kz-quelle";
+            hh.textContent = k.hinweis;
+            karte.appendChild(hh);
+          }
+          raster.appendChild(karte);
+          return;
+        }
         if (k.typ === "vergleich") {
           karte.className = "kz-karte kz-nichtklickbar";
           var farben = ["#E2001A", "#6E6E6E", "#B5B5B2"];

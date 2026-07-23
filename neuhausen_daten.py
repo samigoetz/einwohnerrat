@@ -68,7 +68,7 @@ GEMEINNUETZIG_ASSET = "https://dam-api.bfs.admin.ch/hub/api/dam/assets/16564299/
 # Die Dataflow-Kennung wird per Diagnose am echten System verifiziert.
 SDMX_BESTAND = "CH1.GWS,DF_GWS_WHG_1,1.0.0"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 28          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 29          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -2041,10 +2041,9 @@ def diagnose_mietzins():
         print(f"  FEHLER: {e}")
 
     # 2) Datenabfrage ohne Regionsfilter: welche Regionen liefert der Wuerfel?
-    print("\n--- Datenabfrage OHNE Regionsfilter (Stichprobe) ---")
-    url = (f"{SDMX_BASIS}/{SDMX_CITYSTAT}/....A"
-           f"?dimensionAtObservation=AllDimensions&format=csvfile"
-           f"&startPeriod=2023&endPeriod=2024")
+    print("\n--- Datenabfrage fuer Neuhausen (alle Indikatoren) ---")
+    url = (f"{SDMX_BASIS}/{SDMX_CITYSTAT}/.2937..A"
+           f"?dimensionAtObservation=AllDimensions&format=csvfile")
     try:
         kopf = dict(HEADERS)
         kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
@@ -2096,16 +2095,72 @@ def diagnose_mietzins():
     except Exception as e:
         print(f"  FEHLER: {e}")
 
-    # 3) Der bisherige Weg (zur Kontrolle)
-    print("\n--- Bisheriger Abruf mit Filter 2937 ---")
+    # 2) Indikator-Codes aus der Struktur: welcher steht fuer den Mietzins?
+    print("\n--- Suche Mietzins-Indikator in den Codelisten ---")
+    miet_codes = {}
     try:
-        reihe, url2, guete = _netto_mietzins()
-        print(f"  URL: {url2}")
-        print(f"  Verwertbare Jahre: {len(reihe)} (Guete {guete:.0%})")
-        if reihe:
-            print(f"  Reihe: {reihe}")
+        import xml.etree.ElementTree as ET
+        r = requests.get(struktur_url, headers=HEADERS, timeout=120)
+        root = ET.fromstring(r.content)
+        ns = {"s": "http://www.sdmx.org/resources/sdmxml/schemas/v2_1/structure",
+              "c": "http://www.sdmx.org/resources/sdmxml/schemas/v2_1/common"}
+        raum_treffer = {}
+        for cl in root.findall(".//s:Codelist", ns):
+            clid = cl.attrib.get("id", "")
+            for code in cl.findall("s:Code", ns):
+                cid = code.attrib.get("id", "")
+                namen = [(nm.attrib.get(
+                    "{http://www.w3.org/XML/1998/namespace}lang", ""),
+                    nm.text or "") for nm in code.findall("c:Name", ns)]
+                deutsch = ""
+                for lang, txt_n in namen:
+                    if lang in ("de", "de-CH"):
+                        deutsch = txt_n
+                        break
+                if not deutsch and namen:
+                    deutsch = namen[0][1]
+                dl = deutsch.casefold()
+                if "miet" in dl or "loyer" in dl:
+                    miet_codes[cid] = (clid, deutsch)
+                if cid == "2937":
+                    raum_treffer[clid] = deutsch
+        print(f"  Mietbezogene Codes gefunden: {len(miet_codes)}")
+        for cid, (clid, name) in list(miet_codes.items())[:10]:
+            print(f"    {cid} ({clid}): {name[:70]}")
+        if raum_treffer:
+            for clid, name in raum_treffer.items():
+                print(f"  Code 2937 in {clid}: {name}")
+        else:
+            print("  Code 2937 in keiner Codeliste gefunden!")
     except Exception as e:
-        print(f"  FEHLGESCHLAGEN: {e}")
+        print(f"  FEHLER: {e}")
+
+    # 3) Gezielt pruefen: hat Neuhausen Werte fuer diese Indikatoren?
+    if miet_codes:
+        print("\n--- Werte fuer Neuhausen (2937) je Miet-Indikator ---")
+        for cid in list(miet_codes)[:6]:
+            url = (f"{SDMX_BASIS}/{SDMX_CITYSTAT}/{cid}.2937..A"
+                   f"?dimensionAtObservation=AllDimensions&format=csvfile")
+            try:
+                kopf = dict(HEADERS)
+                kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
+                r = requests.get(url, headers=kopf, timeout=90)
+                if r.status_code >= 400 or len(r.content) < 100:
+                    print(f"  {cid}: HTTP {r.status_code}, keine Daten")
+                    continue
+                import csv as _csv
+                import io as _io
+                zeilen = list(_csv.DictReader(
+                    _io.StringIO(r.content.decode("utf-8-sig", "replace"))))
+                werte = [(z.get("TIME_PERIOD"), z.get("OBS_VALUE"))
+                         for z in zeilen if z.get("OBS_VALUE")]
+                print(f"  {cid} ({miet_codes[cid][1][:40]}): "
+                      f"{len(werte)} Werte")
+                for jahr, wert in sorted(werte)[-6:]:
+                    print(f"       {jahr}: {wert}")
+            except Exception as e:
+                print(f"  {cid}: FEHLER {str(e)[:50]}")
+
     print("\n===== Ende Mietzins-Diagnose =====")
 
 
@@ -2502,6 +2557,67 @@ def baue_kennzahlen() -> None:
                       f"ohne Quote)")
     except Exception as e:
         fehler.append(f"Leerwohnungsziffer: {e}")
+
+    # --- Mietpreise: Datenlage erklaeren statt Zahlen erfinden ---
+    # Fuer Neuhausen publiziert das BFS keine Mietpreise, weil die Gemeinde
+    # unter der Schwelle von 15'000 Einwohnenden der Strukturerhebung liegt.
+    # Statt fremde Portalzahlen zu uebernehmen (rechtlich heikel, methodisch
+    # uneinheitlich), erklaert diese Karte die Lage und nennt belegte Fakten
+    # mit Quelle. Die Angaben sind statisch, da sie sich selten aendern.
+    try:
+        karte("Wohnen", "Mietpreise", "", [],
+              "Verschiedene, je Angabe ausgewiesen", "",
+              hinweis="Stand der Angaben: Juli 2026. Die Datenlücke bei den "
+                      "Mietpreisen betrifft alle Schweizer Gemeinden unter "
+                      "15'000 Einwohnenden.",
+              extra={
+                  "typ": "hinweis",
+                  "kernaussage": "Für Neuhausen werden keine amtlichen "
+                                 "Mietpreise erhoben.",
+                  "punkte": [
+                      {"text": "Die Mietpreise des Bundes stammen aus der "
+                               "Strukturerhebung. Diese liefert Ergebnisse nur "
+                               "für die Schweiz, die Grossregionen, die Kantone "
+                               "und für Gemeinden ab 15'000 Einwohnenden. "
+                               "Neuhausen zählt 11'834 Einwohnende und liegt "
+                               "damit unter dieser Schwelle.",
+                       "quelle": "BFS, Strukturerhebung",
+                       "url": "https://www.bfs.admin.ch/bfs/de/home/statistiken/"
+                              "bevoelkerung/erhebungen/volkszaehlung/"
+                              "vier-kernelemente/strukturerhebung.html"},
+                      {"text": "Ein indirekter Hinweis auf den Mietdruck ist "
+                               "der Leerstand: Die Leerwohnungsziffer in "
+                               "Neuhausen sank von 2,64 Prozent im Jahr 2020 "
+                               "auf 1,07 Prozent im Jahr 2026. Ein sinkender "
+                               "Leerstand deutet auf einen sich anspannenden "
+                               "Wohnungsmarkt hin.",
+                       "quelle": "BFS, Leerwohnungszählung",
+                       "url": "https://www.bfs.admin.ch/bfs/de/home/statistiken/"
+                              "bau-wohnungswesen/wohnungen/leerwohnungen.html"},
+                      {"text": "Für den Kanton Schaffhausen berichteten die "
+                               "Schaffhauser Nachrichten im April 2024, die "
+                               "Angebotsmieten seien innert eines Jahres um "
+                               "12,6 Prozent gestiegen, der höchste Wert aller "
+                               "Kantone. Angebotsmieten sind die Preise "
+                               "ausgeschriebener Wohnungen, nicht die Mieten "
+                               "bestehender Mietverhältnisse.",
+                       "quelle": "Schaffhauser Nachrichten, 19.04.2024",
+                       "url": "https://www.shn.ch/region/kanton/2024-04-19/"
+                              "in-keinem-anderen-kanton-steigen-die-mietpreise-"
+                              "so-stark-wie-in"},
+                      {"text": "Kommerzielle Immobilienportale weisen für "
+                               "Neuhausen eigene Schätzwerte aus. Diese beruhen "
+                               "auf Inseraten, folgen je Anbieter "
+                               "unterschiedlichen Methoden und weichen "
+                               "voneinander ab. Sie sind keine amtliche "
+                               "Statistik und werden hier deshalb nicht "
+                               "übernommen.",
+                       "quelle": ""},
+                  ],
+              })
+        print("  Kennzahlen: Mietpreise (Hinweiskarte mit Quellen)")
+    except Exception as e:
+        fehler.append(f"Mietpreis-Hinweis: {e}")
 
     # --- Vergleich mit Kanton und Schweiz (Wachstum in Prozent) ---
     for name, cube, festl, festd, ab_jahr in (
