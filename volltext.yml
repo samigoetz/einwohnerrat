@@ -1,0 +1,77 @@
+name: Volltext erfassen
+
+# Verarbeitet die PDF-Dokumente fuer die Volltextsuche. Das ist der
+# aufwendigste Teil (Download, Textextraktion, teils Texterkennung) und
+# laeuft deshalb GETRENNT vom Hauptlauf. So bleibt die taegliche
+# Datenaktualisierung schnell und zuverlaessig.
+#
+# Der Lauf ist inkrementell: bereits erfasste Dokumente werden aus
+# volltext.js uebernommen und nicht erneut verarbeitet. Ein Zeitbudget
+# sorgt dafuer, dass sich der Lauf geordnet beendet und den Zwischenstand
+# sichert, statt von GitHub abgebrochen zu werden.
+
+on:
+  schedule:
+    - cron: "35 3 * * *"    # taeglich um 03:35 UTC (nachts, wenig Last)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: volltext-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  volltext:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Repository holen
+        uses: actions/checkout@v5
+
+      - name: Python einrichten
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Texterkennung installieren
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-deu poppler-utils
+
+      - name: Abhaengigkeiten installieren
+        run: pip install requests beautifulsoup4 pypdf pdfplumber openpyxl
+
+      - name: Volltext erfassen
+        env:
+          # Zeitbudget der Verarbeitung; darunter bleibt Luft fuer das
+          # Speichern und Hochladen innerhalb des 50-Minuten-Limits.
+          VOLLTEXT_MINUTEN: "35"
+        run: python neuhausen_daten.py --nur-volltext
+
+      - name: Ergebnis speichern
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add volltext.js
+          git diff --staged --quiet && echo "Keine Aenderungen" && exit 0
+          git commit -m "Volltext aktualisiert"
+          for versuch in 1 2 3; do
+            if git push; then
+              echo "Push erfolgreich (Versuch $versuch)"
+              exit 0
+            fi
+            echo "Push abgewiesen, hole Fremdaenderungen (Versuch $versuch)"
+            mkdir -p /tmp/frisch
+            [ -f volltext.js ] && cp volltext.js /tmp/frisch/volltext.js
+            git fetch origin main
+            git reset --hard origin/main
+            [ -f /tmp/frisch/volltext.js ] && cp /tmp/frisch/volltext.js volltext.js
+            git add volltext.js
+            if git diff --staged --quiet; then
+              echo "Nach Abgleich keine Aenderungen mehr noetig"
+              exit 0
+            fi
+            git commit -m "Volltext aktualisiert"
+          done
+          echo "Push nach drei Versuchen nicht moeglich"
+          exit 1

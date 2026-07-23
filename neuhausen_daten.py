@@ -67,7 +67,7 @@ GEMEINNUETZIG_ASSET = "https://dam-api.bfs.admin.ch/hub/api/dam/assets/16564299/
 # Die Dataflow-Kennung wird per Diagnose am echten System verifiziert.
 SDMX_BESTAND = "CH1.GWS,DF_GWS_WHG_1,1.0.0"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 33          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 34          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -517,7 +517,7 @@ def _ocr_text(daten: bytes) -> str:
 
 
 def _hole_pdf(url: str) -> bytes:
-    resp = requests.get(url, headers=HEADERS, timeout=60)
+    resp = requests.get(url, headers=HEADERS, timeout=25)
     resp.raise_for_status()
     return resp.content
 
@@ -1138,13 +1138,13 @@ def _stattab_reihe(cube: str, festlegungen: list,
     summiere = [s.lower() for s in (summiere or [])]
     basis = f"{STATTAB_BASIS}/{cube}/{cube}.px"
     if cube not in _STATTAB_META:
-        r = requests.get(basis, headers=HEADERS, timeout=60)
+        r = requests.get(basis, headers=HEADERS, timeout=25)
         if r.status_code >= 400:
             # Manche Wuerfel brauchen andere Adressformen: kurz (einstufig)
             # oder dreistufig (Unterordner gleichen Namens).
             for alt_basis in (f"{STATTAB_BASIS}/{cube}.px",
                               f"{STATTAB_BASIS}/{cube}/{cube}/{cube}.px"):
-                r2 = requests.get(alt_basis, headers=HEADERS, timeout=60)
+                r2 = requests.get(alt_basis, headers=HEADERS, timeout=25)
                 if r2.status_code < 400:
                     basis, r = alt_basis, r2
                     break
@@ -1343,7 +1343,7 @@ def _sdmx_struktur_dimensionen(struktur_id: str) -> list:
     import re as _re
     url = (f"https://disseminate.stats.swiss/rest/datastructure/CH1.GWS/"
            f"{struktur_id}/1.0.0?references=children")
-    r = requests.get(url, headers=HEADERS, timeout=60)
+    r = requests.get(url, headers=HEADERS, timeout=25)
     r.raise_for_status()
     txt = r.content.decode("utf-8", "replace")
     # Dimensionen mit Position; TimeDimension separat
@@ -1390,7 +1390,7 @@ def _leerwohnung_bestand(bfs_nr: str = "2937") -> tuple:
     try:
         rreg = requests.get(
             "https://disseminate.stats.swiss/rest/dataflow/CH1.GWS",
-            headers=HEADERS, timeout=60)
+            headers=HEADERS, timeout=25)
         rreg.raise_for_status()
         reg_txt = rreg.content.decode("utf-8", "replace")
     except Exception:
@@ -1526,7 +1526,7 @@ def _anzahl_aus_gemeinde() -> dict:
     """Liest die Anzahl leer stehender Wohnungen je Jahr aus der amtlichen
     Gemeinde-Meldung ('1. Juni JJJJ NN Wohnungen P.PP %'). Ergaenzt die
     neuesten Jahre, die im BFS-Dataflow noch fehlen. Gibt {jahr: anzahl}."""
-    roh = requests.get(AKTUELLES_URL, headers=HEADERS, timeout=60)
+    roh = requests.get(AKTUELLES_URL, headers=HEADERS, timeout=25)
     roh.raise_for_status()
     anzahl = {}
     for m in re.finditer(
@@ -1545,7 +1545,7 @@ def _bestand_aus_gemeinde() -> dict:
     """Liest den Wohnungsbestand je Jahr aus der amtlichen Aktuelles-Meldung
     der Gemeinde ('Auf der Basis von N Wohnungen ...'). Ergaenzt die neuesten
     Jahre, die im GWS-Dataflow noch fehlen. Gibt {jahr: bestand}."""
-    roh = requests.get(AKTUELLES_URL, headers=HEADERS, timeout=60)
+    roh = requests.get(AKTUELLES_URL, headers=HEADERS, timeout=25)
     roh.raise_for_status()
     text = roh.text
     bestand = {}
@@ -1643,7 +1643,7 @@ def _bestand_nach_zimmer(bfs_nr: str = "2937") -> dict:
     try:
         rreg = requests.get(
             "https://disseminate.stats.swiss/rest/dataflow/CH1.GWS",
-            headers=HEADERS, timeout=60)
+            headers=HEADERS, timeout=25)
         rreg.raise_for_status()
         reg_txt = rreg.content.decode("utf-8", "replace")
     except Exception:
@@ -2750,10 +2750,10 @@ def diagnose_stattab():
         print(f"\n===== {name}: {cube} =====")
         try:
             basis = f"{STATTAB_BASIS}/{cube}/{cube}.px"
-            r = requests.get(basis, headers=HEADERS, timeout=60)
+            r = requests.get(basis, headers=HEADERS, timeout=25)
             if r.status_code >= 400:
                 r = requests.get(f"{STATTAB_BASIS}/{cube}.px",
-                                 headers=HEADERS, timeout=60)
+                                 headers=HEADERS, timeout=25)
             r.raise_for_status()
             meta = r.json()
             for var in meta.get("variables", []):
@@ -2777,7 +2777,7 @@ def diagnose_stattab():
     print("\n===== SONDE Bevoelkerung 2024 =====")
     try:
         basis = f"{STATTAB_BASIS}/px-x-0102020000_201/px-x-0102020000_201.px"
-        meta = requests.get(basis, headers=HEADERS, timeout=60).json()
+        meta = requests.get(basis, headers=HEADERS, timeout=25).json()
         # Neuhausen-Code finden
         reg_code = None
         for var in meta["variables"]:
@@ -2820,7 +2820,7 @@ def diagnose_stattab():
                           "values": [var["values"][-1]]}})
                 print(f"  Jahr (letztes): {var['values'][-1]} = {var['valueTexts'][-1]}")
         ant = requests.post(basis, json={"query": q,
-              "response": {"format": "json-stat2"}}, headers=HEADERS, timeout=60)
+              "response": {"format": "json-stat2"}}, headers=HEADERS, timeout=25)
         print(f"  Antwort-Status: {ant.status_code}")
         js = ant.json()
         print(f"  value-Array: {js.get('value')}")
@@ -2853,7 +2853,7 @@ def vergleichsgemeinden(min_ew=9500, max_ew=18000):
     print(f"===== Vergleichsgemeinden {min_ew}-{max_ew} Einwohner =====")
     try:
         basis = f"{STATTAB_BASIS}/px-x-0102020000_201/px-x-0102020000_201.px"
-        meta = requests.get(basis, headers=HEADERS, timeout=60).json()
+        meta = requests.get(basis, headers=HEADERS, timeout=25).json()
     except Exception as e:
         print(f"FEHLER beim Laden der Wuerfel-Struktur: {e}")
         return
@@ -3094,6 +3094,20 @@ def main():
         """Fortschrittsmeldung mit Laufzeit, damit im Log sichtbar ist,
         wo der Lauf gerade steht und was wie lange dauert."""
         print(f"[{monotonic() - _start:6.1f}s] {text}", flush=True)
+
+    if "--nur-kennzahlen" in sys.argv:
+        # Nur die Kennzahlen holen. Die Website-Daten wurden zuvor in einem
+        # eigenen Schritt geholt und bereits gespeichert.
+        try:
+            sys.stdout.reconfigure(line_buffering=True)
+        except Exception:
+            pass
+        try:
+            baue_kennzahlen()
+        except Exception as e:
+            print(f"  Kennzahlen FEHLER: {e}", file=sys.stderr)
+            sys.exit(1)
+        return
 
     if "--nur-volltext" in sys.argv:
         sys.exit(nur_volltext())
