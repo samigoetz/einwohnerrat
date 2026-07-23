@@ -68,7 +68,7 @@ GEMEINNUETZIG_ASSET = "https://dam-api.bfs.admin.ch/hub/api/dam/assets/16564299/
 # Die Dataflow-Kennung wird per Diagnose am echten System verifiziert.
 SDMX_BESTAND = "CH1.GWS,DF_GWS_WHG_1,1.0.0"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 26          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 27          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -1325,17 +1325,34 @@ _GEMEINDE_DIMS = ("GR_KT_GDE", "GDENR", "GEO", "REGION", "GEBIET", "MUNICIPALITY
 
 
 def _leerwohnung_bestand(bfs_nr: str = "2937") -> tuple:
-    """Findet automatisch den GWS-Datenfluss mit Gemeindedaten und holt den
-    Gesamtwohnungsbestand je Jahr fuer die Gemeinde. Durchsucht die
-    DF_GWS_REG-Datenfluesse, prueft deren Struktur auf eine gemeindefaehige
-    Dimension und nimmt den ersten, der fuer die BFS-Nr echte Werte liefert.
+    """Findet den GWS-Wohnungsbestand je Jahr fuer die Gemeinde.
 
-    Gibt (bestand_dict, dataflow_id) zurueck; bei Misserfolg ({}, "").
-    Robust: nur Totalzeilen (alle Bauperioden/Kategorien/Zimmer/Flaechen),
-    plausible Bestandswerte (10-100000)."""
+    Nutzt zuerst das vom BFS dokumentierte Filtermuster fuer DF_GWS_REG5
+    ('A....{Gebietscode}', FREQ zuerst, Gebietscode zuletzt). Erst wenn das
+    nicht greift, wird die Struktur analysiert und der Schluessel selbst
+    gebaut. Gibt (bestand_dict, dataflow_id) zurueck; sonst ({}, "").
+    """
     import re as _re
 
-    # 1) Alle GWS-Dataflows samt Struktur-Referenz aus dem Register holen
+    # --- Stufe 1: dokumentiertes Muster fuer REG5 -------------------------
+    # Quelle: BFS-Beispiel "A....8100" fuer diesen Datenwuerfel.
+    for muster in (f"A....{bfs_nr}", f"A...{bfs_nr}", f"A.....{bfs_nr}"):
+        url = (f"{SDMX_BASIS}/CH1.GWS,DF_GWS_REG5,1.0.0/{muster}"
+               f"?dimensionAtObservation=AllDimensions")
+        try:
+            kopf = dict(HEADERS)
+            kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
+            r = requests.get(url, headers=kopf, timeout=90)
+            if r.status_code >= 400 or len(r.content) < 80:
+                continue
+            bestand = _bestand_aus_csv(
+                r.content.decode("utf-8-sig", "replace"))
+            if len(bestand) >= 3:
+                return bestand, "DF_GWS_REG5"
+        except Exception:
+            continue
+
+    # --- Stufe 2: Struktur analysieren und Schluessel selbst bauen --------
     try:
         rreg = requests.get(
             "https://disseminate.stats.swiss/rest/dataflow/CH1.GWS",
@@ -1519,13 +1536,76 @@ def _bestand_aus_gemeinde() -> dict:
 
 def _bestand_nach_zimmer(bfs_nr: str = "2937") -> dict:
     """Holt den Wohnungsbestand aufgeschluesselt nach Zimmerzahl aus dem
-    GWS-Datenfluss. Ermoeglicht die Leerstandsquote je Wohnungsgroesse,
+    GWS-Datenfluss REG5. Ermoeglicht die Leerstandsquote je Wohnungsgroesse,
     also die Frage: bei welcher Groesse steht anteilig am meisten leer?
-    Gibt {zimmer_label: {jahr: bestand}} zurueck; bei Misserfolg {}.
-
-    Selbstvalidierend: nur plausible Werte, keine Totalzeilen (die wuerden
-    die Einzelkategorien verfaelschen)."""
+    Gibt {zimmer_label: {jahr: bestand}} zurueck; bei Misserfolg {}."""
     import re as _re
+    zimmer_namen = {"1": "1 Zimmer", "2": "2 Zimmer", "3": "3 Zimmer",
+                    "4": "4 Zimmer", "5": "5 Zimmer", "6": "6+ Zimmer"}
+
+    def aus_zeilen(zeilen, zimmer_dim):
+        """Baut aus CSV-Zeilen {label: {jahr: bestand}}; nur Zeilen, bei
+        denen alle uebrigen Aufschluesselungen Total sind."""
+        if not zeilen:
+            return {}
+        ignor = {"TIME_PERIOD", "OBS_VALUE", "STRUCTURE", "STRUCTURE_ID",
+                 "STRUCTURE_NAME", "ACTION", "FREQ", "DECIMALS", "OBS_STATUS"}
+        spalten = [k for k in zeilen[0].keys()
+                   if k and k.upper() == k and k not in ignor
+                   and not k.startswith("DIFF")]
+        andere = [k for k in spalten
+                  if k != zimmer_dim and k.upper() not in _GEMEINDE_DIMS]
+        ergebnis = {}
+        for z in zeilen:
+            if any((z.get(k) or "").strip() not in ("_T", "", "T")
+                   for k in andere):
+                continue
+            zc = (z.get(zimmer_dim) or "").strip()
+            if zc not in zimmer_namen:
+                continue
+            jahr = (z.get("TIME_PERIOD") or "").strip()[:4]
+            wert = (z.get("OBS_VALUE") or "").strip()
+            if not (_re_jahr(jahr) and wert):
+                continue
+            try:
+                v = int(round(float(wert)))
+            except ValueError:
+                continue
+            if 0 <= v <= 100000:
+                ergebnis.setdefault(zimmer_namen[zc], {})[jahr] = v
+        return ergebnis
+
+    # --- Stufe 1: dokumentiertes REG5-Muster, Zimmerdimension per Name ----
+    for muster in (f"A....{bfs_nr}", f"A...{bfs_nr}", f"A.....{bfs_nr}"):
+        url = (f"{SDMX_BASIS}/CH1.GWS,DF_GWS_REG5,1.0.0/{muster}"
+               f"?dimensionAtObservation=AllDimensions")
+        try:
+            kopf = dict(HEADERS)
+            kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
+            r = requests.get(url, headers=kopf, timeout=90)
+            if r.status_code >= 400 or len(r.content) < 80:
+                continue
+            import csv as _csv
+            import io as _io
+            zeilen = list(_csv.DictReader(
+                _io.StringIO(r.content.decode("utf-8-sig", "replace"))))
+            if not zeilen:
+                continue
+            # Zimmerspalte am Namen erkennen (WAZIMS o. Ae.)
+            zdim = None
+            for k in zeilen[0].keys():
+                if k and ("ZIM" in k.upper() or "ROOM" in k.upper()):
+                    zdim = k
+                    break
+            if not zdim:
+                continue
+            ergebnis = aus_zeilen(zeilen, zdim)
+            if len(ergebnis) >= 3:
+                return ergebnis
+        except Exception:
+            continue
+
+    # --- Stufe 2: Struktur analysieren (Rueckfallebene) -------------------
     try:
         rreg = requests.get(
             "https://disseminate.stats.swiss/rest/dataflow/CH1.GWS",
