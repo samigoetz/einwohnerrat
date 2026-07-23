@@ -1973,8 +1973,34 @@ def diagnose_leerwohnung():
               f" ({len(extra['bestand_reihe'])} Jahre)")
         if extra["ist_ziffer"]:
             print(f"Ziffer-Reihe (%): {reihe[0]} ... {reihe[-1]}")
-        print(f"Zimmerverteilung {extra['neuestes_jahr']}: "
+        print(f"Zimmerverteilung {extra.get('neuestes_zimmer_jahr')}: "
               f"{extra['zimmer_verteilung']}")
+
+        # Klartext dazu, ob die Karte "Leerstand nach Wohnungsgroesse"
+        # erzeugt wird und welche Variante.
+        print("\n--- Karte 'Leerstand nach Wohnungsgroesse' ---")
+        vert = extra.get("zimmer_verteilung") or {}
+        quote = extra.get("quote_je_zimmer") or {}
+        nz = extra.get("neuestes_zimmer_jahr")
+        print(f"  Neuestes Gesamtjahr:      {extra.get('neuestes_jahr')}")
+        print(f"  Neuestes Zimmerdatenjahr: {nz}")
+        print(f"  Zimmerkategorien mit Daten: {len(vert)}")
+        print(f"  Kategorien mit Quote:       {len(quote)}")
+        quote_aktuell = {k: v[nz] for k, v in quote.items() if nz in v}
+        if len(quote_aktuell) >= 3:
+            print(f"  -> KARTE MIT QUOTE wird erzeugt "
+                  f"({len(quote_aktuell)} Kategorien)")
+            for k in sorted(quote_aktuell):
+                print(f"       {k}: {quote_aktuell[k]}%")
+        elif vert and sum(vert.values()) > 0:
+            print(f"  -> KARTE MIT ANZAHL wird erzeugt "
+                  f"({len(vert)} Kategorien, ohne Quote)")
+            for k, v in vert.items():
+                print(f"       {k}: {v}")
+        else:
+            print("  -> KEINE KARTE! Grund: Zimmerverteilung ist leer.")
+            print("     Pruefen: liefert die API WOHN_ANZAHL-Zeilen mit "
+                  "LEERWOHN_TYP='_T'?")
     except Exception as e:
         print(f"FEHLGESCHLAGEN: {e}")
 
@@ -2280,6 +2306,20 @@ def baue_kennzahlen() -> None:
             for label, jahre_q in quote.items():
                 if neuestes in jahre_q:
                     quote_aktuell[label] = jahre_q[neuestes]
+            # Falls fuer dieses Jahr keine Quote vorliegt (Bestand nach
+            # Zimmerzahl hinkt evtl. nach), das neueste Jahr nehmen, fuer
+            # das ueberhaupt Quotendaten existieren.
+            if len(quote_aktuell) < 3 and quote:
+                alle_q_jahre = set()
+                for jahre_q in quote.values():
+                    alle_q_jahre.update(jahre_q.keys())
+                if alle_q_jahre:
+                    ersatz = max(alle_q_jahre)
+                    kandidat = {l: jq[ersatz] for l, jq in quote.items()
+                                if ersatz in jq}
+                    if len(kandidat) >= 3:
+                        quote_aktuell = kandidat
+                        neuestes = ersatz
             reihenfolge = ["1 Zimmer", "2 Zimmer", "3 Zimmer",
                            "4 Zimmer", "5 Zimmer", "6+ Zimmer"]
             if len(quote_aktuell) >= 3:
