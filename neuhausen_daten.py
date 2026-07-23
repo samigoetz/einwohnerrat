@@ -67,7 +67,7 @@ GEMEINNUETZIG_ASSET = "https://dam-api.bfs.admin.ch/hub/api/dam/assets/16564299/
 # Die Dataflow-Kennung wird per Diagnose am echten System verifiziert.
 SDMX_BESTAND = "CH1.GWS,DF_GWS_WHG_1,1.0.0"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 31          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 32          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -1229,7 +1229,7 @@ def _stattab_reihe(cube: str, festlegungen: list,
 
     antwort = requests.post(
         basis, json={"query": abfrage, "response": {"format": "json-stat2"}},
-        headers=HEADERS, timeout=90)
+        headers=HEADERS, timeout=30)
     antwort.raise_for_status()
     js = antwort.json()
     if "dataset" in js:  # aeltere json-stat-Variante
@@ -1362,7 +1362,7 @@ def _leerwohnung_bestand(bfs_nr: str = "2937") -> tuple:
         try:
             kopf = dict(HEADERS)
             kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
-            r = requests.get(url, headers=kopf, timeout=90)
+            r = requests.get(url, headers=kopf, timeout=30)
             if r.status_code >= 400 or len(r.content) < 80:
                 continue
             bestand = _bestand_aus_csv(
@@ -1438,7 +1438,7 @@ def _leerwohnung_bestand(bfs_nr: str = "2937") -> tuple:
             try:
                 kopf = dict(HEADERS)
                 kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
-                r = requests.get(url, headers=kopf, timeout=90)
+                r = requests.get(url, headers=kopf, timeout=30)
                 # Leere SDMX-Antworten sind sehr kurz; echte Daten haben
                 # mindestens eine Kopf- und Datenzeile.
                 if r.status_code >= 400 or len(r.content) < 80:
@@ -1602,7 +1602,7 @@ def _bestand_nach_zimmer(bfs_nr: str = "2937") -> dict:
         try:
             kopf = dict(HEADERS)
             kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
-            r = requests.get(url, headers=kopf, timeout=90)
+            r = requests.get(url, headers=kopf, timeout=30)
             if r.status_code >= 400 or len(r.content) < 80:
                 continue
             import csv as _csv
@@ -1676,7 +1676,7 @@ def _bestand_nach_zimmer(bfs_nr: str = "2937") -> dict:
         try:
             kopf = dict(HEADERS)
             kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
-            r = requests.get(url, headers=kopf, timeout=90)
+            r = requests.get(url, headers=kopf, timeout=30)
             if r.status_code >= 400 or len(r.content) < 80:
                 continue
             import csv as _csv
@@ -1895,7 +1895,7 @@ def _sdmx_struktur_dims_codelisten(agency_dataflow: str, version: str = "") -> t
     ver = version or "+"
     url = (f"https://disseminate.stats.swiss/rest/v2/structure/dataflow/"
            f"{agency}/{dataflow}/{ver}?references=all&detail=referencepartial")
-    r = requests.get(url, headers=HEADERS, timeout=90)
+    r = requests.get(url, headers=HEADERS, timeout=30)
     r.raise_for_status()
     root = ET.fromstring(r.content)
     ns = {"s": "http://www.sdmx.org/resources/sdmxml/schemas/v2_1/structure",
@@ -1993,7 +1993,7 @@ def _netto_mietzins(bfs_nr="2937"):
            f"&startPeriod=2016&endPeriod=2024")
     kopf = dict(HEADERS)
     kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
-    r = requests.get(url, headers=kopf, timeout=90)
+    r = requests.get(url, headers=kopf, timeout=30)
     r.raise_for_status()
     import csv as _csv
     import io as _io
@@ -2039,7 +2039,7 @@ def diagnose_mietzins():
                     "dataflow/CH1.CITYSTAT/DF_CITYSTAT_CHURB_2/+"
                     "?references=all&detail=referencepartial")
     try:
-        r = requests.get(struktur_url, headers=HEADERS, timeout=90)
+        r = requests.get(struktur_url, headers=HEADERS, timeout=30)
         print(f"  HTTP {r.status_code}, {len(r.content):,} Bytes")
         txt = r.content.decode("utf-8", "replace")
         import re as _re
@@ -2067,7 +2067,7 @@ def diagnose_mietzins():
     try:
         kopf = dict(HEADERS)
         kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
-        r = requests.get(url, headers=kopf, timeout=120)
+        r = requests.get(url, headers=kopf, timeout=30)
         print(f"  HTTP {r.status_code}, {len(r.content):,} Bytes")
         if r.status_code < 400 and len(r.content) > 100:
             import csv as _csv
@@ -2120,7 +2120,7 @@ def diagnose_mietzins():
     miet_codes = {}
     try:
         import xml.etree.ElementTree as ET
-        r = requests.get(struktur_url, headers=HEADERS, timeout=120)
+        r = requests.get(struktur_url, headers=HEADERS, timeout=30)
         root = ET.fromstring(r.content)
         ns = {"s": "http://www.sdmx.org/resources/sdmxml/schemas/v2_1/structure",
               "c": "http://www.sdmx.org/resources/sdmxml/schemas/v2_1/common"}
@@ -2164,7 +2164,7 @@ def diagnose_mietzins():
             try:
                 kopf = dict(HEADERS)
                 kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
-                r = requests.get(url, headers=kopf, timeout=90)
+                r = requests.get(url, headers=kopf, timeout=30)
                 if r.status_code >= 400 or len(r.content) < 100:
                     print(f"  {cid}: HTTP {r.status_code}, keine Daten")
                     continue
@@ -2271,6 +2271,27 @@ def baue_kennzahlen() -> None:
     bereiche = []
     fehler = []
 
+    # Zeitbudget: Faellt ein Datenanbieter aus oder antwortet sehr langsam,
+    # soll der Lauf trotzdem fertig werden. Nach Ablauf werden weitere
+    # Kennzahlen uebersprungen; die bereits geholten bleiben erhalten.
+    # Ueber KENNZAHLEN_MINUTEN steuerbar.
+    import os as _os
+    from time import monotonic as _mono
+    try:
+        _kz_budget = float(_os.environ.get("KENNZAHLEN_MINUTEN", "12"))
+    except ValueError:
+        _kz_budget = 12.0
+    _kz_frist = _mono() + _kz_budget * 60
+
+    def zeit_uebrig(bezeichnung=""):
+        """True, solange noch Budget da ist. Sonst Meldung und False."""
+        if _mono() < _kz_frist:
+            return True
+        if bezeichnung:
+            print(f"  Kennzahlen: Zeitbudget erreicht, "
+                  f"{bezeichnung} uebersprungen", flush=True)
+        return False
+
     def karte(bereich_titel, name, einheit, reihe, quelle, quelle_url,
               hinweis="", extra=None):
         for b in bereiche:
@@ -2369,6 +2390,8 @@ def baue_kennzahlen() -> None:
     # Jahrescodierung. Fuer kleine Gemeinden schwankt die Ziffer stark,
     # daher der Hinweis.
     try:
+        if not zeit_uebrig("Leerwohnungsziffer"):
+            raise TimeoutError("Zeitbudget")
         reihe, url, extra = _leerwohnungsziffer()
         if reihe:
             ist_ziffer = extra.get("ist_ziffer")
@@ -2569,6 +2592,8 @@ def baue_kennzahlen() -> None:
     # Nutzt den Finanz-Extraktor; jede Kennzahl ist durch Kontrollsummen
     # abgesichert. Enthaelt auch die Steuerfuesse als echte Zeitreihe.
     try:
+        if not zeit_uebrig("Finanzkennzahlen"):
+            raise TimeoutError("Zeitbudget")
         import finanz_extraktor as fx
         fin = fx.baue_finanz_zeitreihen()
         anzahl = 0
@@ -2633,11 +2658,21 @@ def baue_kennzahlen() -> None:
             return _w.index(name) if name in _w else len(_w)
         bereich["karten"] = sorted(bereich["karten"], key=_rang)
 
+    # Wurden Kennzahlen wegen des Zeitbudgets uebersprungen, darf der
+    # Zwischenspeicher nicht eine ganze Woche gelten. Sonst fehlten sie
+    # bis zur naechsten regulaeren Pruefung. In dem Fall schon am naechsten
+    # Tag erneut versuchen.
+    unvollstaendig = _mono() >= _kz_frist
+    takt = 1 if unvollstaendig else KENNZAHLEN_PRUEFTAKT_TAGE
+    if unvollstaendig:
+        print("  Kennzahlen: unvollstaendig (Zeitbudget), "
+              "naechster Versuch morgen", flush=True)
+
     obj = {
         "version": KENNZAHLEN_VERSION,
         "stand": jetzt.strftime("%d.%m.%Y %H:%M"),
         "naechste_pruefung": int((jetzt + timedelta(
-            days=KENNZAHLEN_PRUEFTAKT_TAGE)).strftime("%Y%m%d")),
+            days=takt)).strftime("%Y%m%d")),
         "bereiche": bereiche,
     }
     KENNZAHLEN_AUSGABE.write_text(
@@ -2830,7 +2865,7 @@ def vergleichsgemeinden(min_ew=9500, max_ew=18000):
         try:
             r = requests.post(basis, json={"query": q,
                               "response": {"format": "json-stat2"}},
-                              headers=HEADERS, timeout=120)
+                              headers=HEADERS, timeout=30)
             r.raise_for_status()
             js = r.json()
             werte = js.get("value", [])
