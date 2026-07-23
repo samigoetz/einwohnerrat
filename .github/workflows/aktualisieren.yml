@@ -29,9 +29,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Texterkennung installieren
-        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-deu poppler-utils
-
       - name: Abhaengigkeiten installieren
         run: pip install requests beautifulsoup4 pypdf pdfplumber openpyxl
 
