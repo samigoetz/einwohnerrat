@@ -68,7 +68,7 @@ GEMEINNUETZIG_ASSET = "https://dam-api.bfs.admin.ch/hub/api/dam/assets/16564299/
 # Die Dataflow-Kennung wird per Diagnose am echten System verifiziert.
 SDMX_BESTAND = "CH1.GWS,DF_GWS_WHG_1,1.0.0"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 24          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 25          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -1517,6 +1517,108 @@ def _bestand_aus_gemeinde() -> dict:
     return bestand
 
 
+def _bestand_nach_zimmer(bfs_nr: str = "2937") -> dict:
+    """Holt den Wohnungsbestand aufgeschluesselt nach Zimmerzahl aus dem
+    GWS-Datenfluss. Ermoeglicht die Leerstandsquote je Wohnungsgroesse,
+    also die Frage: bei welcher Groesse steht anteilig am meisten leer?
+    Gibt {zimmer_label: {jahr: bestand}} zurueck; bei Misserfolg {}.
+
+    Selbstvalidierend: nur plausible Werte, keine Totalzeilen (die wuerden
+    die Einzelkategorien verfaelschen)."""
+    import re as _re
+    try:
+        rreg = requests.get(
+            "https://disseminate.stats.swiss/rest/dataflow/CH1.GWS",
+            headers=HEADERS, timeout=60)
+        rreg.raise_for_status()
+        reg_txt = rreg.content.decode("utf-8", "replace")
+    except Exception:
+        return {}
+
+    df_zu_dsd = {}
+    for m in _re.finditer(
+            r'<(?:structure:)?Dataflow[^>]*\bid="(DF_GWS_[^"]+)"(.*?)'
+            r'</(?:structure:)?Dataflow>', reg_txt, _re.DOTALL):
+        ref = _re.search(r'\bid="(DSD_GWS_[^"]+)"', m.group(2))
+        if ref:
+            df_zu_dsd[m.group(1)] = ref.group(1)
+    if not df_zu_dsd:
+        for dfid in _re.findall(r'\bid="(DF_GWS_REG\d)"', reg_txt):
+            df_zu_dsd[dfid] = dfid.replace("DF_", "DSD_")
+
+    # Zimmer-Codes wie in der Leerwohnungsquelle
+    zimmer_namen = {"1": "1 Zimmer", "2": "2 Zimmer", "3": "3 Zimmer",
+                    "4": "4 Zimmer", "5": "5 Zimmer", "6": "6+ Zimmer"}
+    bevorzugt = "DF_GWS_REG5"
+    reihenfolge = ([bevorzugt] if bevorzugt in df_zu_dsd else []) + \
+                  [d for d in df_zu_dsd if d != bevorzugt]
+    for dfid in reihenfolge:
+        try:
+            dims = _sdmx_struktur_dimensionen(df_zu_dsd[dfid])
+        except Exception:
+            continue
+        region_pos = None
+        zimmer_dim = None
+        for i, d in enumerate(dims):
+            du = d.upper()
+            if du in _GEMEINDE_DIMS and region_pos is None:
+                region_pos = i
+            if ("ZIM" in du or "WAZIM" in du or "ROOM" in du) and zimmer_dim is None:
+                zimmer_dim = d
+        if region_pos is None or zimmer_dim is None:
+            continue
+        teile = ["" for _ in dims]
+        teile[region_pos] = str(bfs_nr)
+        if "FREQ" in dims:
+            teile[dims.index("FREQ")] = "A"
+        url = (f"{SDMX_BASIS}/CH1.GWS,{dfid},1.0.0/{'.'.join(teile)}"
+               f"?dimensionAtObservation=AllDimensions")
+        try:
+            kopf = dict(HEADERS)
+            kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
+            r = requests.get(url, headers=kopf, timeout=90)
+            if r.status_code >= 400 or len(r.content) < 80:
+                continue
+            import csv as _csv
+            import io as _io
+            zeilen = list(_csv.DictReader(
+                _io.StringIO(r.content.decode("utf-8-sig", "replace"))))
+        except Exception:
+            continue
+
+        # Aufschluesselungs-Spalten ausser Zimmer muessen Total sein,
+        # sonst wuerde nach Bauperiode/Kategorie mehrfach gezaehlt.
+        ignor = {"TIME_PERIOD", "OBS_VALUE", "STRUCTURE", "STRUCTURE_ID",
+                 "STRUCTURE_NAME", "ACTION", "FREQ", "DECIMALS", "OBS_STATUS"}
+        spalten = [k for k in (zeilen[0].keys() if zeilen else [])
+                   if k and k.upper() == k and k not in ignor
+                   and not k.startswith("DIFF")]
+        andere = [k for k in spalten
+                  if k != zimmer_dim and k.upper() not in _GEMEINDE_DIMS]
+
+        ergebnis = {}
+        for z in zeilen:
+            if any((z.get(k) or "").strip() not in ("_T", "", "T")
+                   for k in andere):
+                continue
+            zc = (z.get(zimmer_dim) or "").strip()
+            if zc not in zimmer_namen:
+                continue
+            jahr = (z.get("TIME_PERIOD") or "").strip()[:4]
+            wert = (z.get("OBS_VALUE") or "").strip()
+            if not (_re_jahr(jahr) and wert):
+                continue
+            try:
+                v = int(round(float(wert)))
+            except ValueError:
+                continue
+            if 0 <= v <= 100000:
+                ergebnis.setdefault(zimmer_namen[zc], {})[jahr] = v
+        if len(ergebnis) >= 3:
+            return ergebnis
+    return {}
+
+
 def _leerwohnungsziffer(region_begriff: str = "neuhausen am rheinfall",
                         bfs_nr: str = "2937") -> tuple:
     """Holt die Leerwohnungsdaten aus der offiziellen SDMX-API der
@@ -1627,12 +1729,31 @@ def _leerwohnungsziffer(region_begriff: str = "neuhausen am rheinfall",
     else:
         reihe = anzahl_reihe
 
+    # 5) Leerstandsquote je Zimmergroesse: zeigt, bei welcher Wohnungsgroesse
+    #    anteilig am meisten leer steht. Aussagekraeftiger fuer einen Mangel
+    #    als die blosse Anzahl, da es von jeder Groesse unterschiedlich viele
+    #    Wohnungen gibt. Nur wenn der Bestand nach Zimmerzahl verfuegbar ist.
+    quote_je_zimmer = {}
+    try:
+        bestand_zimmer = _bestand_nach_zimmer(bfs_nr)
+        for label, jahre_bestand in bestand_zimmer.items():
+            leer_jahre = verteilung_jahre.get(label, {})
+            for jahr, leer in leer_jahre.items():
+                # Bestand des Vorjahres (gleiche Methodik wie Gesamtziffer)
+                best = jahre_bestand.get(str(int(jahr) - 1))
+                if best and best > 0:
+                    quote_je_zimmer.setdefault(label, {})[jahr] = \
+                        round(leer / best * 100, 2)
+    except Exception:
+        quote_je_zimmer = {}
+
     extra = {
         "anzahl_reihe": anzahl_reihe,
         "bestand_reihe": sorted(bestand.items()),
         "bestand_quelle": bestand_df,
         "zimmer_verteilung": verteilung,
         "zimmer_verteilung_jahre": verteilung_jahre,
+        "quote_je_zimmer": quote_je_zimmer,
         "neuestes_jahr": neuestes,
         "ist_ziffer": ist_ziffer,
     }
@@ -2079,45 +2200,6 @@ def baue_kennzahlen() -> None:
     except Exception as e:
         fehler.append(f"Neu erstellte Wohnungen: {e}")
 
-    # --- Neubau nach Zimmerzahl (Verteilung, welche Wohnungsgroessen entstehen) ---
-    # Wuerfel _105: neu erstellte Wohnungen nach Zimmerzahl, bis 2024.
-    # Zeigt als Verteilung, welche Groessen zuletzt gebaut wurden, plus
-    # die Summe der letzten Jahre fuer eine stabilere Aussage.
-    try:
-        ZIMMER = [
-            ("1-Zimmer", ["1-zimmer-wohnung"]),
-            ("2-Zimmer", ["2-zimmer-wohnung"]),
-            ("3-Zimmer", ["3-zimmer-wohnung"]),
-            ("4-Zimmer", ["4-zimmer-wohnung"]),
-            ("5-Zimmer", ["5-zimmer-wohnung"]),
-            ("6+ Zimmer", ["6-zimmer-wohnung oder grösser"]),
-        ]
-        verteilung = []
-        url_neubau = ""
-        for label, begriffe in ZIMMER:
-            reihe, url_neubau = _stattab_reihe(
-                "px-x-0904030000_105", [],
-                fest={"Anzahl Zimmer": begriffe})
-            # Summe der letzten 5 Jahre (stabiler als ein Einzeljahr)
-            letzte = reihe[-5:] if len(reihe) >= 5 else reihe
-            summe = sum(w for _, w in letzte)
-            verteilung.append((label, summe))
-        gesamt = sum(w for _, w in verteilung)
-        if gesamt > 0:
-            # Als "Reihe" fuer die Karte: Label -> Anteil in Prozent
-            anteile = [(label, round(w / gesamt * 100, 1))
-                       for label, w in verteilung]
-            karte("Wohnen", "Neubau nach Wohnungsgrösse", "%",
-                  anteile, "BFS, STAT-TAB", url_neubau,
-                  hinweis="Anteil der neu erstellten Wohnungen nach Zimmerzahl, "
-                          "Summe der letzten 5 Jahre",
-                  extra={"typ": "verteilung"})
-            spitze = max(anteile, key=lambda x: x[1])
-            print(f"  Kennzahlen: Neubau nach Zimmerzahl "
-                  f"(haeufigste {spitze[0]} mit {spitze[1]}%)")
-    except Exception as e:
-        fehler.append(f"Neubau nach Zimmerzahl: {e}")
-
     # --- Leerwohnungsziffer (BFS Leerwohnungszaehlung, Vollerhebung) ---
     # Robuster Direktabruf: probiert mehrere URL-Formen, verkraftet den
     # BFS-Platzhalter "..." (Daten nicht verfuegbar) und die verschachtelte
@@ -2155,20 +2237,45 @@ def baue_kennzahlen() -> None:
                 print(f"  Kennzahlen: Wohnungsbestand {bestand[0][0]}\u2013"
                       f"{bestand[-1][0]} (aktuell {bestand[-1][1]})")
 
-            # Leer stehende Wohnungen nach Zimmerzahl (aufsteigend geordnet)
+            # Leerstand nach Zimmerzahl (aufsteigend geordnet).
+            # Bevorzugt die Leerstandsquote je Groesse (zeigt echten Mangel),
+            # sonst die Anzahl leer stehender Wohnungen.
             verteilung = extra.get("zimmer_verteilung") or {}
-            if verteilung and sum(verteilung.values()) > 0:
+            quote = extra.get("quote_je_zimmer") or {}
+            neuestes = extra.get("neuestes_jahr", "")
+            quote_aktuell = {}
+            for label, jahre_q in quote.items():
+                if neuestes in jahre_q:
+                    quote_aktuell[label] = jahre_q[neuestes]
+            reihenfolge = ["1 Zimmer", "2 Zimmer", "3 Zimmer",
+                           "4 Zimmer", "5 Zimmer", "6+ Zimmer"]
+            if len(quote_aktuell) >= 3:
+                reihe_v = [(l, quote_aktuell[l]) for l in reihenfolge
+                           if l in quote_aktuell]
+                karte("Wohnen", "Leerstand nach Wohnungsgrösse", "%",
+                      reihe_v, "BFS, Leerwohnungszählung und GWS "
+                               "(data.stats.swiss)", url,
+                      hinweis=f"Anteil leer stehender Wohnungen am Bestand "
+                              f"der jeweiligen Grösse ({neuestes}). Zeigt, bei "
+                              f"welcher Wohnungsgrösse anteilig am meisten "
+                              f"leer steht.",
+                      extra={"typ": "verteilung",
+                             "verlauf_je_kategorie": quote,
+                             "verlauf_einheit": "%",
+                             "anteil_ist_wert": True})
+                print(f"  Kennzahlen: Leerstandsquote nach Zimmerzahl "
+                      f"({len(reihe_v)} Kategorien)")
+            elif verteilung and sum(verteilung.values()) > 0:
                 reihe_v = [(k, v) for k, v in verteilung.items()]
-                # Mehrjahresdaten fuer den Zeitverlauf je Zimmerzahl in der
-                # Detailansicht mitgeben.
                 vj = extra.get("zimmer_verteilung_jahre") or {}
                 karte("Wohnen", "Leerstand nach Wohnungsgrösse", "Wohnungen",
                       reihe_v, "BFS, Leerwohnungszählung (data.stats.swiss)",
                       url, hinweis=f"Leer stehende Wohnungen nach Zimmerzahl "
-                                   f"({extra.get('neuestes_jahr','')})",
+                                   f"({neuestes}). Anteil am gesamten "
+                                   f"Leerstand.",
                       extra={"typ": "verteilung", "verlauf_je_kategorie": vj})
                 print(f"  Kennzahlen: Leerstand nach Zimmerzahl "
-                      f"({len(verteilung)} Kategorien)")
+                      f"({len(verteilung)} Kategorien, ohne Quote)")
     except Exception as e:
         fehler.append(f"Leerwohnungsziffer: {e}")
 

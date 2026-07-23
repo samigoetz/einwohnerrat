@@ -33,9 +33,6 @@
 
   .kopf { background: var(--rot); color: var(--weiss); padding: 34px 0 26px; }
   .kopf .wrap { padding-bottom: 0; }
-  .start-kopf { margin-bottom: 22px; }
-  .start-titel { font-size: 22px; font-weight: 700; color: var(--schwarz); margin: 0 0 6px; }
-  .start-text { font-size: 15px; line-height: 1.6; color: #555; max-width: 640px; margin: 0; }
   .start-kacheln { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
   @media (max-width: 720px) { .start-kacheln { grid-template-columns: repeat(2, 1fr); } }
   @media (max-width: 460px) { .start-kacheln { grid-template-columns: 1fr; } }
@@ -47,9 +44,6 @@
   .start-kachel:hover { background: #f6f6f6; transform: translateY(-2px); }
   .start-kachel .sk-name { font-size: 16px; font-weight: 700; color: var(--schwarz); }
   .start-kachel .sk-info { font-size: 12px; color: #888; margin-top: 5px; }
-  .start-kachel.sk-akzent { border-color: var(--rot); background: #fdeff0; }
-  .start-kachel.sk-akzent .sk-name { color: var(--rot); }
-  .start-kachel.sk-akzent .sk-info { color: #b33; }
   h1 {
     font-size: clamp(30px, 5.5vw, 48px); font-weight: 800;
     letter-spacing: -0.015em; line-height: 1.02; margin: 0;
@@ -506,10 +500,6 @@
 
   <!-- STARTSEITE -->
   <section class="panel aktiv" id="panel-start">
-    <div class="start-kopf">
-      <h2 class="start-titel">Willkommen</h2>
-      <p class="start-text">Der Einwohnerrat und die Kennzahlen der Gemeinde Neuhausen am Rheinfall, öffentlich zugänglich gemacht. Wählen Sie einen Bereich.</p>
-    </div>
     <div class="start-kacheln" id="start-kacheln"></div>
   </section>
 
@@ -1530,17 +1520,17 @@
     var graph = document.createElement("div");
     graph.className = "kz-graph";
     // Umschaltung der Darstellung: Linie, Balken, Fläche
-    var aktuelleDarstellung = "linie";
+    var aktuelleDarstellung = "flaeche";
     function zeichneGraph() {
       graph.innerHTML = "";
       graph.appendChild(kzGrossgraph(reihe, k.einheit, k.zonen, aktuelleDarstellung));
     }
     var schalter = document.createElement("div");
     schalter.className = "kz-darstellung-schalter";
-    [["linie", "Linie"], ["balken", "Balken"], ["flaeche", "Fläche"]].forEach(
+    [["flaeche", "Fläche"], ["linie", "Linie"], ["balken", "Balken"]].forEach(
       function (paar) {
         var b = document.createElement("button");
-        b.className = "kz-dstl" + (paar[0] === "linie" ? " aktiv" : "");
+        b.className = "kz-dstl" + (paar[0] === "flaeche" ? " aktiv" : "");
         b.textContent = paar[1];
         b.addEventListener("click", function () {
           aktuelleDarstellung = paar[0];
@@ -1705,7 +1695,9 @@
       yl.setAttribute("x", links - 8); yl.setAttribute("y", (y + 4).toFixed(1));
       yl.setAttribute("text-anchor", "end");
       yl.setAttribute("font-size", "12"); yl.setAttribute("fill", "#6E6E6E");
-      yl.textContent = Math.round(wv);
+      yl.textContent = k.verlauf_einheit === "%"
+        ? (Math.round(wv * 100) / 100) + "%"
+        : Math.round(wv);
       svg.appendChild(yl);
     }
     // X-Achse
@@ -1876,12 +1868,15 @@
           var summeV = 0;
           (k.reihe || []).forEach(function (w) { summeV += w[1]; });
           summeV = summeV || 1;
+          // Bei der Leerstandsquote ist der Wert bereits ein Prozentwert
+          // je Kategorie; dann nicht am Gesamtwert normieren.
+          var istQuote = k.anteil_ist_wert === true;
           var maxAnteil = 1;
           (k.reihe || []).forEach(function (w) {
-            maxAnteil = Math.max(maxAnteil, w[1] / summeV * 100);
+            maxAnteil = Math.max(maxAnteil, istQuote ? w[1] : w[1] / summeV * 100);
           });
           (k.reihe || []).forEach(function (w) {
-            var anteil = w[1] / summeV * 100;
+            var anteil = istQuote ? w[1] : w[1] / summeV * 100;
             var z = document.createElement("div");
             z.className = "kz-vgl-zeile";
             var lab = document.createElement("div");
@@ -1896,7 +1891,9 @@
             z.appendChild(bal);
             var wt = document.createElement("div");
             wt.className = "wert";
-            wt.textContent = Math.round(anteil) + " %";
+            wt.textContent = istQuote
+              ? (Math.round(anteil * 100) / 100) + " %"
+              : Math.round(anteil) + " %";
             z.appendChild(wt);
             vt.appendChild(z);
           });
@@ -2378,7 +2375,7 @@
     { panel: "berichte", name: "Berichte & Anträge", info: "Berichte und Anträge des Gemeinderats" },
     { panel: "protokolle", name: "Beschlüsse & Protokolle", info: "Beschlüsse und Sitzungsprotokolle" },
     { panel: "statistik", name: "Statistik Vorstösse", info: "Auswertungen der parlamentarischen Arbeit" },
-    { panel: "kennzahlen", name: "Kennzahlen", info: "Gemeindekennzahlen und Finanzen", akzent: true },
+    { panel: "kennzahlen", name: "Kennzahlen", info: "Gemeindekennzahlen und Finanzen" },
     { panel: "aktuelles", name: "Aktuelles", info: "Mitteilungen der Gemeinde" },
     { panel: "presse", name: "Presse", info: "Medienberichte über Neuhausen" },
   ];
@@ -2414,7 +2411,7 @@
     box.innerHTML = "";
     START_BEREICHE.forEach(function (b) {
       var k = document.createElement("button");
-      k.className = "start-kachel" + (b.akzent ? " sk-akzent" : "");
+      k.className = "start-kachel";
       var info = zahlen[b.panel] || b.info;
       k.innerHTML = '<span class="sk-name">' + b.name + '</span>' +
         '<span class="sk-info">' + info + '</span>';

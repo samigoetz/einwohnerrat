@@ -428,11 +428,16 @@ KENNZAHL_META = {
         "erklaerung": "Zeigt, wie aktiv die Gemeinde investiert, gemessen am "
                       "Anteil der Investitionen an den Gesamtausgaben.",
         "was_bedeutet": "Unter 10 % schwache, 10–20 % mittlere, 20–30 % hohe, "
-                        "über 30 % sehr hohe Investitionstätigkeit. Keine "
-                        "Kennzahl von gut oder schlecht, sondern der Aktivität.",
-        "richtung": "neutral",
-        "skala": [(10, "schwach"), (20, "mittel"), (30, "hoch"),
-                  (None, "sehr hoch")],
+                        "über 30 % sehr hohe Investitionstätigkeit. Hinweis: "
+                        "Die amtliche Statistik weist diese Kennzahl neutral "
+                        "aus. Die Farbgebung hier ordnet eine höhere "
+                        "Investitionstätigkeit als positiv ein, weil sie "
+                        "Zukunftsvorsorge und öffentliche Leistungen bedeutet.",
+        "richtung": "hoch_gut",
+        "skala_hoch": [(30, "sehr hohe Investitionen"),
+                       (20, "hohe Investitionen"),
+                       (10, "mittlere Investitionen"),
+                       (None, "schwache Investitionen")],
     },
     "nettoschuld_pro_kopf": {
         "name": "Nettoschuld pro Einwohner:in",
@@ -470,11 +475,13 @@ def beurteile(schluessel, wert):
 # Ampel-Zuordnung der Labels (gleiche Logik wie im HTML/CSS).
 _AMPEL = {
     "gruen": {"gut", "ideal", "sehr gut", "nettovermögen",
-              "geringe belastung", "geringe verschuldung"},
+              "geringe belastung", "geringe verschuldung",
+              "sehr hohe investitionen", "hohe investitionen"},
     "orange": {"genügend", "mittel", "tragbare belastung", "problematisch",
-               "mittlere verschuldung", "hoch"},
+               "mittlere verschuldung", "hoch", "mittlere investitionen"},
     "rot": {"schlecht", "kritisch", "ungenügend", "hohe belastung",
-            "hohe verschuldung", "sehr hohe verschuldung"},
+            "hohe verschuldung", "sehr hohe verschuldung",
+            "schwache investitionen"},
     "neutral": {"schwach", "sehr hoch"},
 }
 
