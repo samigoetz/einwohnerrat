@@ -795,7 +795,11 @@
   var AKTUELLES_URL = "https://neuhausen.ch/aktuelles";
 
   var $ = function (id) { return document.getElementById(id); };
-  function istMobil() { return window.matchMedia("(max-width: 680px)").matches; }
+  function istMobil() {
+    try {
+      return window.matchMedia && window.matchMedia("(max-width: 680px)").matches;
+    } catch (e) { return false; }
+  }
 
   // ---- Volltextsuche: laedt volltext.js erst bei Aktivierung nach ----------
   var volltextAktiv = { v: false, b: false, p: false };
@@ -858,7 +862,13 @@
     try { return JSON.parse(localStorage.getItem(SPEICHER_KEY)) || {}; }
     catch (e) { return {}; }
   }
-  function speichereStand(s) { localStorage.setItem(SPEICHER_KEY, JSON.stringify(s)); }
+  function speichereStand(s) {
+    // Abgesichert: In manchen Browsern und Datenschutz-Modi ist der
+    // lokale Speicher gesperrt. Ohne diesen Schutz brach die gesamte
+    // Datenverarbeitung ab und die Seite blieb bei "Wird geladen".
+    try { localStorage.setItem(SPEICHER_KEY, JSON.stringify(s)); }
+    catch (e) { /* Merkfunktion fuer Gelesenes entfaellt, sonst egal */ }
+  }
   function setStatus(text, zustand) {
     $("statustext").textContent = text;
     $("dot").className = "dot" + (zustand ? " " + zustand : "");
@@ -2373,14 +2383,23 @@
 
     stand.bekannt = bekannt;
     speichereStand(stand);
-    rendereVorstoesse();
-    rendereBA();
-    rendereBP();
-    rendereAK();
-    renderePR();
-    rendereJahrFilter();
-    rendereStatistik();
-    rendereStart();
+    // Jeden Bereich einzeln absichern: scheitert einer (z. B. wegen
+    // unerwarteter Daten), werden die uebrigen trotzdem angezeigt.
+    function sicherR(name, fn) {
+      try { fn(); } catch (e) {
+        if (window.console && console.error) {
+          console.error("Fehler beim Rendern von " + name + ":", e);
+        }
+      }
+    }
+    sicherR("Vorstoesse", rendereVorstoesse);
+    sicherR("Berichte", rendereBA);
+    sicherR("Beschluesse", rendereBP);
+    sicherR("Aktuelles", rendereAK);
+    sicherR("Presse", renderePR);
+    sicherR("Jahrfilter", rendereJahrFilter);
+    sicherR("Statistik", rendereStatistik);
+    sicherR("Startseite", rendereStart);
 
     var basis = "Datenstand " + (d.erzeugt || "?") +
       " \u00b7 Quelle: neuhausen.ch \u00b7 aktualisiert viertelst\u00fcndlich";
@@ -2412,6 +2431,17 @@
     window.scrollTo(0, 0);
   }
 
+  // ---- Startseite --------------------------------------------------------------------
+  var START_BEREICHE = [
+    { panel: "vorstoesse", name: "Vorstösse", info: "Kleine Anfragen, Interpellationen, Postulate, Motionen" },
+    { panel: "berichte", name: "Berichte & Anträge", info: "Berichte und Anträge des Gemeinderats" },
+    { panel: "protokolle", name: "Beschlüsse & Protokolle", info: "Beschlüsse und Sitzungsprotokolle" },
+    { panel: "statistik", name: "Statistik Vorstösse", info: "Auswertungen der parlamentarischen Arbeit" },
+    { panel: "kennzahlen", name: "Kennzahlen", info: "Gemeindekennzahlen und Finanzen" },
+    { panel: "aktuelles", name: "Aktuelles", info: "Mitteilungen der Gemeinde" },
+    { panel: "presse", name: "Presse", info: "Medienberichte über Neuhausen" },
+  ];
+
   function rendereStart() {
     var box = $("start-kacheln");
     if (!box) return;
@@ -2435,9 +2465,19 @@
   }
 
   function starte() {
-    messeKopfOffset();
-    rendereKZ();
-    rendereStart();
+    // Jeden Schritt einzeln absichern: faellt einer aus, laufen die
+    // uebrigen trotzdem. Vorher konnte ein einziger Fehler die ganze
+    // Seite auf "Wird geladen" stehen lassen.
+    function sicher(name, fn) {
+      try { fn(); } catch (e) {
+        if (window.console && console.error) {
+          console.error("Fehler in " + name + ":", e);
+        }
+      }
+    }
+    sicher("messeKopfOffset", messeKopfOffset);
+    sicher("rendereKZ", rendereKZ);
+    sicher("rendereStart", rendereStart);
     if (window.NEUHAUSEN_DATEN) {
       verarbeite(window.NEUHAUSEN_DATEN);
     } else {
@@ -2554,7 +2594,7 @@
 
   $("reset").addEventListener("click", function () {
     if (confirm("Gespeicherten Lesestand l\u00f6schen? Beim n\u00e4chsten Laden gilt wieder alles als bekannt.")) {
-      localStorage.removeItem(SPEICHER_KEY);
+      try { localStorage.removeItem(SPEICHER_KEY); } catch (e) {}
       setStatus("Lesestand gel\u00f6scht. Seite neu laden zum Neuaufsetzen.", null);
     }
   });
