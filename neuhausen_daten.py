@@ -67,7 +67,7 @@ GEMEINNUETZIG_ASSET = "https://dam-api.bfs.admin.ch/hub/api/dam/assets/16564299/
 # Die Dataflow-Kennung wird per Diagnose am echten System verifiziert.
 SDMX_BESTAND = "CH1.GWS,DF_GWS_WHG_1,1.0.0"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 34          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 35          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -1307,7 +1307,7 @@ def _wachstum(reihe: list, ab_jahr: int):
 
 
 def _sdmx_csv(dataflow: str, schluessel: str, timeout: int = 30,
-              filter_fn=None) -> tuple:
+              filter_fn=None, ab_jahr=None, max_zeilen=20000) -> tuple:
     """Ruft die SDMX-API im CSV-Format ab und gibt (zeilen, url) zurueck.
 
     Speicherschonend: Die Antwort wird zeilenweise gelesen (Streaming) statt
@@ -1319,6 +1319,10 @@ def _sdmx_csv(dataflow: str, schluessel: str, timeout: int = 30,
     import csv
     url = (f"{SDMX_BASIS}/{dataflow}/{schluessel}"
            f"?dimensionAtObservation=AllDimensions")
+    if ab_jahr:
+        # Zeitraum serverseitig begrenzen: verkleinert die Antwort deutlich
+        # und senkt damit den Speicherbedarf.
+        url += f"&startPeriod={ab_jahr}"
     kopf = dict(HEADERS)
     kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
     r = requests.get(url, headers=kopf, timeout=timeout, stream=True)
@@ -1333,6 +1337,11 @@ def _sdmx_csv(dataflow: str, schluessel: str, timeout: int = 30,
     for zeile in leser:
         if filter_fn is None or filter_fn(zeile):
             zeilen.append(zeile)
+            # Notbremse gegen unerwartet riesige Antworten.
+            if len(zeilen) >= max_zeilen:
+                print(f"  Hinweis: Antwort auf {max_zeilen} Zeilen begrenzt",
+                      flush=True)
+                break
     r.close()
     return zeilen, url
 
@@ -1372,7 +1381,7 @@ def _leerwohnung_bestand(bfs_nr: str = "2937") -> tuple:
     # Quelle: BFS-Beispiel "A....8100" fuer diesen Datenwuerfel.
     for muster in (f"A....{bfs_nr}", f"A...{bfs_nr}", f"A.....{bfs_nr}"):
         url = (f"{SDMX_BASIS}/CH1.GWS,DF_GWS_REG5,1.0.0/{muster}"
-               f"?dimensionAtObservation=AllDimensions")
+               f"?dimensionAtObservation=AllDimensions&startPeriod=2010")
         try:
             kopf = dict(HEADERS)
             kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
@@ -1612,7 +1621,7 @@ def _bestand_nach_zimmer(bfs_nr: str = "2937") -> dict:
     # --- Stufe 1: dokumentiertes REG5-Muster, Zimmerdimension per Name ----
     for muster in (f"A....{bfs_nr}", f"A...{bfs_nr}", f"A.....{bfs_nr}"):
         url = (f"{SDMX_BASIS}/CH1.GWS,DF_GWS_REG5,1.0.0/{muster}"
-               f"?dimensionAtObservation=AllDimensions")
+               f"?dimensionAtObservation=AllDimensions&startPeriod=2010")
         try:
             kopf = dict(HEADERS)
             kopf["Accept"] = "application/vnd.sdmx.data+csv; charset=utf-8"
@@ -1758,7 +1767,8 @@ def _leerwohnungsziffer(region_begriff: str = "neuhausen am rheinfall",
         return typ in ("_T", "", "T")
 
     zeilen, url = _sdmx_csv(SDMX_LEERWOHNUNG, f"{bfs_nr}...V.A",
-                            filter_fn=_brauchbar)
+                            filter_fn=_brauchbar, ab_jahr=2010,
+                            max_zeilen=5000)
     anzahl = {}
     for z in zeilen:
         jahr = (z.get("TIME_PERIOD") or "").strip()
