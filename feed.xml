@@ -5,7 +5,13 @@
 <link>https://neuhausen.ch/einwohnerrat</link>
 <description>Vorstösse, Berichte &amp; Anträge sowie Beschlüsse &amp; Protokolle des Einwohnerrats Neuhausen am Rheinfall. Automatisch aufbereitet.</description>
 <language>de-ch</language>
-<lastBuildDate>Sun, 26 Jul 2026 17:48:00 +0200</lastBuildDate>
+<lastBuildDate>Sun, 26 Jul 2026 22:17:00 +0200</lastBuildDate>
+<item>
+<title>[Presse · SHN] Wo der Rheinfall zum Dancefloor wird</title>
+<link>https://www.shn.ch/region/neuhausen/2026-07-26/wo-der-rheinfall-zum-dancefloor-wird</link>
+<guid isPermaLink="false">pr|26.07.2026|woderrheinfallzumdancefloorwird</guid>
+<pubDate>Sun, 26 Jul 2026 12:00:00 +0200</pubDate>
+</item>
 <item>
 <title>[Aktuelles] Absage Rheinfallfeuerwerk und Höhenfeuer</title>
 <link>https://neuhausen.ch/aktuelles</link>
@@ -358,12 +364,6 @@
 <title>[Aktuelles] Dienstjubliäum im Alterszentrum Neuhausen am Rheinfall</title>
 <link>https://neuhausen.ch/aktuelles</link>
 <guid isPermaLink="false">ak|27.05.2026|Dienstjubliäum im Alterszentrum Neuhausen am Rheinfall</guid>
-<pubDate>Wed, 27 May 2026 12:00:00 +0200</pubDate>
-</item>
-<item>
-<title>[Presse · SHN] Je nach Standort: So hoch sind die Taxen beim neuen Neuhauser Pflegezentrum</title>
-<link>https://www.shn.ch/region/neuhausen/2026-05-27/je-nach-standort-so-hoch-sind-die-taxen-beim-neuen-neuhauser</link>
-<guid isPermaLink="false">pr|27.05.2026|jenachstandortsohochsinddietaxenbeimneuenneuhauserpflegezent</guid>
 <pubDate>Wed, 27 May 2026 12:00:00 +0200</pubDate>
 </item>
 </channel>
