@@ -67,7 +67,7 @@ GEMEINNUETZIG_ASSET = "https://dam-api.bfs.admin.ch/hub/api/dam/assets/16564299/
 # Die Dataflow-Kennung wird per Diagnose am echten System verifiziert.
 SDMX_BESTAND = "CH1.GWS,DF_GWS_WHG_1,1.0.0"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 35          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 36          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -2345,6 +2345,33 @@ def baue_kennzahlen() -> None:
         _kz_budget = 12.0
     _kz_frist = _mono() + _kz_budget * 60
 
+    import signal as _signal
+
+    class _Zeitgrenze:
+        """Harte Obergrenze fuer einen Codeblock. Notwendig, weil das
+        Zeitlimit von requests nur zwischen Datenpaketen greift: Bei einer
+        sehr grossen oder langsam tropfenden Antwort laeuft ein Abruf sonst
+        unbegrenzt weiter und blockiert den ganzen Lauf."""
+
+        def __init__(self, sekunden, name=""):
+            self.sekunden = int(sekunden)
+            self.name = name
+
+        def __enter__(self):
+            if self.sekunden > 0 and hasattr(_signal, "SIGALRM"):
+                def _ausloeser(signum, frame):
+                    raise TimeoutError(
+                        f"{self.name} nach {self.sekunden}s abgebrochen")
+                self._alt = _signal.signal(_signal.SIGALRM, _ausloeser)
+                _signal.alarm(self.sekunden)
+            return self
+
+        def __exit__(self, *args):
+            if self.sekunden > 0 and hasattr(_signal, "SIGALRM"):
+                _signal.alarm(0)
+                _signal.signal(_signal.SIGALRM, self._alt)
+            return False
+
     def zeit_uebrig(bezeichnung=""):
         """True, solange noch Budget da ist. Sonst Meldung und False."""
         if _mono() < _kz_frist:
@@ -2451,110 +2478,6 @@ def baue_kennzahlen() -> None:
               f"{reihe[-1][0]} ({len(reihe)} Werte, aktuell {reihe[-1][1]})")
     except Exception as e:
         fehler.append(f"Neu erstellte Wohnungen: {e}")
-
-    # --- Leerwohnungsziffer (BFS Leerwohnungszaehlung, Vollerhebung) ---
-    # Robuster Direktabruf: probiert mehrere URL-Formen, verkraftet den
-    # BFS-Platzhalter "..." (Daten nicht verfuegbar) und die verschachtelte
-    # Jahrescodierung. Fuer kleine Gemeinden schwankt die Ziffer stark,
-    # daher der Hinweis.
-    try:
-        if not zeit_uebrig("Leerwohnungsziffer"):
-            raise TimeoutError("Zeitbudget")
-        reihe, url, extra = _leerwohnungsziffer()
-        if reihe:
-            ist_ziffer = extra.get("ist_ziffer")
-            einheit = "%" if ist_ziffer else "Wohnungen"
-            name = "Leerwohnungsziffer" if ist_ziffer else "Leer stehende Wohnungen"
-            hinweis = ("Anteil leer stehender Wohnungen am Gesamtbestand "
-                       "(Stichtag 1. Juni). Anzahl aus der Leerwohnungszählung, "
-                       "Bestand aus der Gebäude- und Wohnungsstatistik. Bei "
-                       "kleinen Gemeinden von Jahr zu Jahr stark schwankend."
-                       if ist_ziffer else
-                       "Anzahl leer stehender, am Markt angebotener Wohnungen "
-                       "(Stichtag 1. Juni). Bei kleinen Gemeinden stark "
-                       "schwankend.")
-            gen = extra.get("genaeherte_jahre") or []
-            if ist_ziffer and gen:
-                hinweis += (f" Für {len(gen)} ältere Jahrgänge liegt kein "
-                            f"exakter Vorjahresbestand vor; dort wurde der "
-                            f"zeitlich nächstgelegene Bestand verwendet.")
-            karte("Wohnen", name, einheit, reihe,
-                  "BFS, Leerwohnungszählung (data.stats.swiss)", url,
-                  hinweis=hinweis)
-            print(f"  Kennzahlen: {name} {reihe[0][0]}\u2013"
-                  f"{reihe[-1][0]} ({len(reihe)} Werte, aktuell {reihe[-1][1]}"
-                  f"{'%' if ist_ziffer else ''})")
-
-            # Gesamtwohnungsbestand als eigene Kennzahl
-            bestand = extra.get("bestand_reihe") or []
-            if len(bestand) >= 3:
-                karte("Wohnen", "Wohnungsbestand", "Wohnungen",
-                      bestand, "BFS, Gebäude- und Wohnungsstatistik",
-                      url, hinweis="Gesamtzahl aller Wohnungen in der Gemeinde "
-                                   "(Jahresende), inklusive der neu erstellten. "
-                                   "Zeigt das Gesamtwachstum des Wohnraums.")
-                print(f"  Kennzahlen: Wohnungsbestand {bestand[0][0]}\u2013"
-                      f"{bestand[-1][0]} (aktuell {bestand[-1][1]})")
-
-            # Leerstand nach Zimmerzahl (aufsteigend geordnet).
-            # Bevorzugt die Leerstandsquote je Groesse (zeigt echten Mangel),
-            # sonst die Anzahl leer stehender Wohnungen.
-            verteilung = extra.get("zimmer_verteilung") or {}
-            quote = extra.get("quote_je_zimmer") or {}
-            # Das Jahr der Zimmerdaten kann aelter sein als das Gesamtjahr,
-            # weil die Gemeinde-Meldung keine Aufschluesselung enthaelt.
-            neuestes = (extra.get("neuestes_zimmer_jahr")
-                        or extra.get("neuestes_jahr", ""))
-            quote_aktuell = {}
-            for label, jahre_q in quote.items():
-                if neuestes in jahre_q:
-                    quote_aktuell[label] = jahre_q[neuestes]
-            # Falls fuer dieses Jahr keine Quote vorliegt (Bestand nach
-            # Zimmerzahl hinkt evtl. nach), das neueste Jahr nehmen, fuer
-            # das ueberhaupt Quotendaten existieren.
-            if len(quote_aktuell) < 3 and quote:
-                alle_q_jahre = set()
-                for jahre_q in quote.values():
-                    alle_q_jahre.update(jahre_q.keys())
-                if alle_q_jahre:
-                    ersatz = max(alle_q_jahre)
-                    kandidat = {l: jq[ersatz] for l, jq in quote.items()
-                                if ersatz in jq}
-                    if len(kandidat) >= 3:
-                        quote_aktuell = kandidat
-                        neuestes = ersatz
-            reihenfolge = ["1 Zimmer", "2 Zimmer", "3 Zimmer",
-                           "4 Zimmer", "5 Zimmer", "6+ Zimmer"]
-            if len(quote_aktuell) >= 3:
-                reihe_v = [(l, quote_aktuell[l]) for l in reihenfolge
-                           if l in quote_aktuell]
-                karte("Wohnen", "Leerstand nach Wohnungsgrösse", "%",
-                      reihe_v, "BFS, Leerwohnungszählung und GWS "
-                               "(data.stats.swiss)", url,
-                      hinweis="Anteil leer stehender Wohnungen am Bestand "
-                              "der jeweiligen Grösse. Zeigt, bei welcher "
-                              "Wohnungsgrösse anteilig am meisten leer steht.",
-                      extra={"typ": "verteilung",
-                             "verlauf_je_kategorie": quote,
-                             "verlauf_einheit": "%",
-                             "anteil_ist_wert": True,
-                             "stand": neuestes})
-                print(f"  Kennzahlen: Leerstandsquote nach Zimmerzahl "
-                      f"({len(reihe_v)} Kategorien, Stand {neuestes})")
-            elif verteilung and sum(verteilung.values()) > 0:
-                reihe_v = [(k, v) for k, v in verteilung.items()]
-                vj = extra.get("zimmer_verteilung_jahre") or {}
-                karte("Wohnen", "Leerstand nach Wohnungsgrösse", "Wohnungen",
-                      reihe_v, "BFS, Leerwohnungszählung (data.stats.swiss)",
-                      url, hinweis="Anzahl leer stehender Wohnungen je "
-                                   "Wohnungsgrösse am Stichtag 1. Juni.",
-                      extra={"typ": "verteilung", "verlauf_je_kategorie": vj,
-                             "stand": neuestes})
-                print(f"  Kennzahlen: Leerstand nach Zimmerzahl "
-                      f"({len(verteilung)} Kategorien, Stand {neuestes}, "
-                      f"ohne Quote)")
-    except Exception as e:
-        fehler.append(f"Leerwohnungsziffer: {e}")
 
     # --- Mietpreise: Datenlage erklaeren statt Zahlen erfinden ---
     # Fuer Neuhausen publiziert das BFS keine Mietpreise, weil die Gemeinde
@@ -2663,7 +2586,9 @@ def baue_kennzahlen() -> None:
         if not zeit_uebrig("Finanzkennzahlen"):
             raise TimeoutError("Zeitbudget")
         import finanz_extraktor as fx
-        fin = fx.baue_finanz_zeitreihen()
+        # Harte Grenze: laedt mehrere PDF-Jahrgaenge.
+        with _Zeitgrenze(120, "Finanzkennzahlen"):
+            fin = fx.baue_finanz_zeitreihen()
         anzahl = 0
         for sch, kz in fin["kennzahlen"].items():
             reihe = kz["reihe"]  # [[jahr, wert, beurteilung], ...]
@@ -2735,6 +2660,116 @@ def baue_kennzahlen() -> None:
     if unvollstaendig:
         print("  Kennzahlen: unvollstaendig (Zeitbudget), "
               "naechster Versuch morgen", flush=True)
+
+    # Die Leerwohnungsziffer kommt ZULETZT: Sie laedt die groesste
+    # Datei und hat den Lauf wiederholt blockiert. So sind alle
+    # uebrigen Kennzahlen bereits gesichert, wenn sie ausfaellt.
+    # --- Leerwohnungsziffer (BFS Leerwohnungszaehlung, Vollerhebung) ---
+    # Robuster Direktabruf: probiert mehrere URL-Formen, verkraftet den
+    # BFS-Platzhalter "..." (Daten nicht verfuegbar) und die verschachtelte
+    # Jahrescodierung. Fuer kleine Gemeinden schwankt die Ziffer stark,
+    # daher der Hinweis.
+    try:
+        if not zeit_uebrig("Leerwohnungsziffer"):
+            raise TimeoutError("Zeitbudget")
+        # Harte Grenze: Diese Abfrage laedt die groesste Datei und hat den
+        # Lauf wiederholt blockiert. Nach 90 Sekunden wird abgebrochen.
+        with _Zeitgrenze(90, "Leerwohnungsziffer"):
+            reihe, url, extra = _leerwohnungsziffer()
+        if reihe:
+            ist_ziffer = extra.get("ist_ziffer")
+            einheit = "%" if ist_ziffer else "Wohnungen"
+            name = "Leerwohnungsziffer" if ist_ziffer else "Leer stehende Wohnungen"
+            hinweis = ("Anteil leer stehender Wohnungen am Gesamtbestand "
+                       "(Stichtag 1. Juni). Anzahl aus der Leerwohnungszählung, "
+                       "Bestand aus der Gebäude- und Wohnungsstatistik. Bei "
+                       "kleinen Gemeinden von Jahr zu Jahr stark schwankend."
+                       if ist_ziffer else
+                       "Anzahl leer stehender, am Markt angebotener Wohnungen "
+                       "(Stichtag 1. Juni). Bei kleinen Gemeinden stark "
+                       "schwankend.")
+            gen = extra.get("genaeherte_jahre") or []
+            if ist_ziffer and gen:
+                hinweis += (f" Für {len(gen)} ältere Jahrgänge liegt kein "
+                            f"exakter Vorjahresbestand vor; dort wurde der "
+                            f"zeitlich nächstgelegene Bestand verwendet.")
+            karte("Wohnen", name, einheit, reihe,
+                  "BFS, Leerwohnungszählung (data.stats.swiss)", url,
+                  hinweis=hinweis)
+            print(f"  Kennzahlen: {name} {reihe[0][0]}\u2013"
+                  f"{reihe[-1][0]} ({len(reihe)} Werte, aktuell {reihe[-1][1]}"
+                  f"{'%' if ist_ziffer else ''})")
+
+            # Gesamtwohnungsbestand als eigene Kennzahl
+            bestand = extra.get("bestand_reihe") or []
+            if len(bestand) >= 3:
+                karte("Wohnen", "Wohnungsbestand", "Wohnungen",
+                      bestand, "BFS, Gebäude- und Wohnungsstatistik",
+                      url, hinweis="Gesamtzahl aller Wohnungen in der Gemeinde "
+                                   "(Jahresende), inklusive der neu erstellten. "
+                                   "Zeigt das Gesamtwachstum des Wohnraums.")
+                print(f"  Kennzahlen: Wohnungsbestand {bestand[0][0]}\u2013"
+                      f"{bestand[-1][0]} (aktuell {bestand[-1][1]})")
+
+            # Leerstand nach Zimmerzahl (aufsteigend geordnet).
+            # Bevorzugt die Leerstandsquote je Groesse (zeigt echten Mangel),
+            # sonst die Anzahl leer stehender Wohnungen.
+            verteilung = extra.get("zimmer_verteilung") or {}
+            quote = extra.get("quote_je_zimmer") or {}
+            # Das Jahr der Zimmerdaten kann aelter sein als das Gesamtjahr,
+            # weil die Gemeinde-Meldung keine Aufschluesselung enthaelt.
+            neuestes = (extra.get("neuestes_zimmer_jahr")
+                        or extra.get("neuestes_jahr", ""))
+            quote_aktuell = {}
+            for label, jahre_q in quote.items():
+                if neuestes in jahre_q:
+                    quote_aktuell[label] = jahre_q[neuestes]
+            # Falls fuer dieses Jahr keine Quote vorliegt (Bestand nach
+            # Zimmerzahl hinkt evtl. nach), das neueste Jahr nehmen, fuer
+            # das ueberhaupt Quotendaten existieren.
+            if len(quote_aktuell) < 3 and quote:
+                alle_q_jahre = set()
+                for jahre_q in quote.values():
+                    alle_q_jahre.update(jahre_q.keys())
+                if alle_q_jahre:
+                    ersatz = max(alle_q_jahre)
+                    kandidat = {l: jq[ersatz] for l, jq in quote.items()
+                                if ersatz in jq}
+                    if len(kandidat) >= 3:
+                        quote_aktuell = kandidat
+                        neuestes = ersatz
+            reihenfolge = ["1 Zimmer", "2 Zimmer", "3 Zimmer",
+                           "4 Zimmer", "5 Zimmer", "6+ Zimmer"]
+            if len(quote_aktuell) >= 3:
+                reihe_v = [(l, quote_aktuell[l]) for l in reihenfolge
+                           if l in quote_aktuell]
+                karte("Wohnen", "Leerstand nach Wohnungsgrösse", "%",
+                      reihe_v, "BFS, Leerwohnungszählung und GWS "
+                               "(data.stats.swiss)", url,
+                      hinweis="Anteil leer stehender Wohnungen am Bestand "
+                              "der jeweiligen Grösse. Zeigt, bei welcher "
+                              "Wohnungsgrösse anteilig am meisten leer steht.",
+                      extra={"typ": "verteilung",
+                             "verlauf_je_kategorie": quote,
+                             "verlauf_einheit": "%",
+                             "anteil_ist_wert": True,
+                             "stand": neuestes})
+                print(f"  Kennzahlen: Leerstandsquote nach Zimmerzahl "
+                      f"({len(reihe_v)} Kategorien, Stand {neuestes})")
+            elif verteilung and sum(verteilung.values()) > 0:
+                reihe_v = [(k, v) for k, v in verteilung.items()]
+                vj = extra.get("zimmer_verteilung_jahre") or {}
+                karte("Wohnen", "Leerstand nach Wohnungsgrösse", "Wohnungen",
+                      reihe_v, "BFS, Leerwohnungszählung (data.stats.swiss)",
+                      url, hinweis="Anzahl leer stehender Wohnungen je "
+                                   "Wohnungsgrösse am Stichtag 1. Juni.",
+                      extra={"typ": "verteilung", "verlauf_je_kategorie": vj,
+                             "stand": neuestes})
+                print(f"  Kennzahlen: Leerstand nach Zimmerzahl "
+                      f"({len(verteilung)} Kategorien, Stand {neuestes}, "
+                      f"ohne Quote)")
+    except Exception as e:
+        fehler.append(f"Leerwohnungsziffer: {e}")
 
     _sichere_kennzahlen(bereiche, vollstaendig=not unvollstaendig,
                         takt_tage=takt)
