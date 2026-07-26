@@ -69,8 +69,12 @@ jobs:
       # Website-Daten oben bereits sicher im Repository.
       - name: Kennzahlen holen
         continue-on-error: true
+        timeout-minutes: 6
         env:
-          KENNZAHLEN_MINUTEN: "8"
+          # Bewusst knapp: Der Lauf wurde zuvor nach rund sechs Minuten
+          # abgebrochen. Mit vier Minuten beendet sich der Kennzahlen-Teil
+          # selbst und sichert, was er hat, statt abgewuergt zu werden.
+          KENNZAHLEN_MINUTEN: "4"
         run: python neuhausen_daten.py --nur-kennzahlen
 
       - name: Kennzahlen speichern
