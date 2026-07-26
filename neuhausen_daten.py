@@ -67,7 +67,7 @@ GEMEINNUETZIG_ASSET = "https://dam-api.bfs.admin.ch/hub/api/dam/assets/16564299/
 # Die Dataflow-Kennung wird per Diagnose am echten System verifiziert.
 SDMX_BESTAND = "CH1.GWS,DF_GWS_WHG_1,1.0.0"
 KENNZAHLEN_PRUEFTAKT_TAGE = 7   # amtliche Zahlen aendern sich selten
-KENNZAHLEN_VERSION = 36          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
+KENNZAHLEN_VERSION = 37          # bei Ausbau/Korrektur erhoehen: erzwingt Neuabfrage
 STATTAB_BASIS = "https://www.pxweb.bfs.admin.ch/api/v1/de"
 STATTAB_SEITE = "https://www.pxweb.bfs.admin.ch/pxweb/de"
 FEED_AUSGABE = BASIS / "feed.xml"
@@ -1475,41 +1475,56 @@ def _leerwohnung_bestand(bfs_nr: str = "2937") -> tuple:
     return {}, ""
 
 
-def _bestand_aus_csv(text: str) -> dict:
-    """Summiert aus einer GWS-CSV den Gesamtwohnungsbestand je Jahr.
-    Nimmt nur Totalzeilen (alle Aufschluesselungs-Dimensionen auf Total '_T'
-    oder gleichwertig), um Doppelzaehlung zu vermeiden. Faellt, wenn keine
-    reinen Totalzeilen existieren, auf die Summe je Jahr ueber die
-    feinste Vollpartition zurueck."""
+def _bestand_aus_csv(text: str, max_plausibel: int = 40000) -> dict:
+    """Liest aus einer GWS-CSV den Gesamtwohnungsbestand je Jahr.
+
+    NUR echte Totalzeilen werden verwendet, also Zeilen, bei denen alle
+    Aufschluesselungs-Dimensionen (Bauperiode, Gebaeudekategorie, Zimmerzahl,
+    Flaechenklasse) auf "Total" stehen.
+
+    WICHTIG: Frueher wurde ersatzweise ueber alle Zeilen summiert, wenn keine
+    Totalzeilen gefunden wurden. Das ergab eine massive Mehrfachzaehlung
+    (jede Wohnung erscheint in mehreren Aufschluesselungen) und damit
+    voellig falsche Werte, etwa 50'000 statt 6'300 Wohnungen. Diese
+    Ersatzrechnung ist entfernt: Lieber keine Zahl als eine falsche.
+
+    Zusaetzlich greift eine Plausibilitaetsgrenze: Werte oberhalb von
+    `max_plausibel` werden verworfen, weil eine Gemeinde dieser Groesse
+    keinen so grossen Wohnungsbestand hat.
+    """
     import csv
     import io
     zeilen = list(csv.DictReader(io.StringIO(text)))
     if not zeilen:
         return {}
-    # Aufschluesselungs-Dimensionen (alles ausser Zeit/Wert/Struktur/Region)
+
+    # Aufschluesselungs-Dimensionen bestimmen (alles ausser Zeit, Wert,
+    # Struktur- und Metadatenspalten sowie der Regionsspalte)
     ignor = {"TIME_PERIOD", "OBS_VALUE", "STRUCTURE", "STRUCTURE_ID",
-             "STRUCTURE_NAME", "ACTION", "FREQ"}
+             "STRUCTURE_NAME", "ACTION", "FREQ", "DECIMALS", "OBS_STATUS",
+             "DATAFLOW", "CONF_STATUS"}
     spalten = [k for k in zeilen[0].keys()
                if k and k.upper() == k and k not in ignor
-               and not k.startswith("DIFF") and k not in ("DECIMALS",
-               "OBS_STATUS")]
-    # Regionsspalte ausschliessen (sie ist konstant = unsere Gemeinde)
+               and not k.startswith("DIFF")]
     aufschluessel = [k for k in spalten
                      if k.upper() not in _GEMEINDE_DIMS
                      and not k.lower().startswith("grossregion")]
 
     def ist_total(row):
+        """True nur, wenn ALLE Aufschluesselungen auf Total stehen."""
         for k in aufschluessel:
             v = (row.get(k) or "").strip()
-            if v and v not in ("_T", "T", "_Z", "TOTAL", "0"):
+            # Leere Felder gelten als Total; alles andere muss ein
+            # ausdruecklicher Total-Code sein.
+            if v and v.upper() not in ("_T", "T", "_Z", "TOTAL"):
                 return False
         return True
 
     bestand = {}
-    total_zeilen = [z for z in zeilen if ist_total(z)]
-    quelle = total_zeilen if total_zeilen else zeilen
-    aggregiert = not total_zeilen
-    for z in quelle:
+    unplausibel = 0
+    for z in zeilen:
+        if not ist_total(z):
+            continue
         jahr = (z.get("TIME_PERIOD") or "").strip()[:4]
         wert = (z.get("OBS_VALUE") or "").strip()
         if not (_re_jahr(jahr) and wert):
@@ -1518,13 +1533,17 @@ def _bestand_aus_csv(text: str) -> dict:
             v = float(wert)
         except ValueError:
             continue
-        if aggregiert:
-            bestand[jahr] = bestand.get(jahr, 0) + v
-        else:
+        if v < 10 or v > max_plausibel:
+            unplausibel += 1
+            continue
+        # Bei mehreren Totalzeilen je Jahr die groesste nehmen (sollte
+        # nicht vorkommen, schuetzt aber vor Teilsummen).
+        if jahr not in bestand or v > bestand[jahr]:
             bestand[jahr] = v
-    # Plausibilisierung
-    return {j: int(round(v)) for j, v in bestand.items()
-            if 10 <= v <= 100000}
+    if unplausibel:
+        print(f"  Bestand: {unplausibel} unplausible Werte verworfen",
+              flush=True)
+    return {j: int(round(v)) for j, v in bestand.items()}
 
 
 def _re_jahr(s: str) -> bool:
@@ -1875,7 +1894,13 @@ def _leerwohnungsziffer(region_begriff: str = "neuhausen am rheinfall",
                     best = bestand[str(naechstes)]
                     genaehert.append(jahr)
             if best and best > 0:
-                reihe.append((jahr, round(leer / best * 100, 2)))
+                ziffer = round(leer / best * 100, 2)
+                # Plausibilitaet: Eine Leerwohnungsziffer liegt in der
+                # Schweiz zwischen etwa 0 und 10 Prozent. Werte darunter
+                # oder darueber deuten auf einen falschen Nenner hin und
+                # werden verworfen, statt eine falsche Zahl zu zeigen.
+                if 0 <= ziffer <= 10:
+                    reihe.append((jahr, ziffer))
         # Falls fuer zu wenige Jahre ein Bestand vorliegt, auf Anzahl
         if len(reihe) < 3:
             ist_ziffer = False
