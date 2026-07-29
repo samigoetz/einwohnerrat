@@ -5,12 +5,18 @@
 <link>https://neuhausen.ch/einwohnerrat</link>
 <description>Vorstösse, Berichte &amp; Anträge sowie Beschlüsse &amp; Protokolle des Einwohnerrats Neuhausen am Rheinfall. Automatisch aufbereitet.</description>
 <language>de-ch</language>
-<lastBuildDate>Wed, 29 Jul 2026 13:00:00 +0200</lastBuildDate>
+<lastBuildDate>Wed, 29 Jul 2026 18:13:00 +0200</lastBuildDate>
 <item>
 <title>[Aktuelles] Absage Rheinfallfeuerwerk und Höhenfeuer</title>
 <link>https://neuhausen.ch/aktuelles</link>
 <guid isPermaLink="false">ak|31.07.2026|Absage Rheinfallfeuerwerk und Höhenfeuer</guid>
 <pubDate>Fri, 31 Jul 2026 12:00:00 +0200</pubDate>
+</item>
+<item>
+<title>[Presse · tagesanzeiger.ch] Kanton Schaffhausen: Trockenheit legt Feuerwerk am Rheinfall lahm</title>
+<link>https://news.google.com/rss/articles/CBMinwFBVV95cUxNMGFJQ00tdlE0cmFyeWJQcnNpVWdNY1RfMVlRSjk0ay1XTTlmYXBwa253ajlhZ2dacHNCMXg5aGZDTnRoLUVCNFpablFTZDdJNEs3b3FYTG00OTE0akdHNVpuc0U0Q2ZyVE1seDlTSnNwTlQtd3N1dy1GajU5YTQ3ZjkweUJwZ1gxak92RXlVcEhYcUk3T2txXzNIQ1E5V3c?oc=5</link>
+<guid isPermaLink="false">pr|29.07.2026|kantonschaffhausentrockenheitlegtfeuerwerkamrheinfalllahm</guid>
+<pubDate>Wed, 29 Jul 2026 12:00:00 +0200</pubDate>
 </item>
 <item>
 <title>[Aktuelles] Trinkwasserqualität</title>
@@ -359,12 +365,6 @@
 <link>https://www.shn.ch/region/neuhausen/2026-06-11/nach-falscher-zahl-im-neuhauser-abstimmungsmagazin-beschwerde-hat</link>
 <guid isPermaLink="false">pr|11.06.2026|nachfalscherzahlimneuhauserabstimmungsmagazinbeschwerdehatke</guid>
 <pubDate>Thu, 11 Jun 2026 12:00:00 +0200</pubDate>
-</item>
-<item>
-<title>[Presse · SHN] Burgunwiese: Vorstoss wirft Fragen zur Finanzierung des Alterszentrums auf</title>
-<link>https://www.shn.ch/region/neuhausen/2026-06-10/burgunwiese-vorstoss-wirft-fragen-zur-finanzierung-des-alterszentrums</link>
-<guid isPermaLink="false">pr|10.06.2026|burgunwiesevorstosswirftfragenzurfinanzierungdesalterszentru</guid>
-<pubDate>Wed, 10 Jun 2026 12:00:00 +0200</pubDate>
 </item>
 </channel>
 </rss>
