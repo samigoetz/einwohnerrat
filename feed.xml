@@ -5,7 +5,7 @@
 <link>https://neuhausen.ch/einwohnerrat</link>
 <description>Vorstösse, Berichte &amp; Anträge sowie Beschlüsse &amp; Protokolle des Einwohnerrats Neuhausen am Rheinfall. Automatisch aufbereitet.</description>
 <language>de-ch</language>
-<lastBuildDate>Wed, 29 Jul 2026 02:14:00 +0200</lastBuildDate>
+<lastBuildDate>Wed, 29 Jul 2026 13:00:00 +0200</lastBuildDate>
 <item>
 <title>[Aktuelles] Absage Rheinfallfeuerwerk und Höhenfeuer</title>
 <link>https://neuhausen.ch/aktuelles</link>
@@ -160,6 +160,12 @@
 <title>[Presse · SHN] «Zusammen sind wir stärker» – Kebo wird von Plastisud übernommen</title>
 <link>https://www.shn.ch/region/neuhausen/2026-07-03/zusammen-sind-wir-staerker-kebo-wird-von-plastisud-uebernommen</link>
 <guid isPermaLink="false">pr|03.07.2026|zusammensindwirstarkerkebowirdvonplastisudubernommen</guid>
+<pubDate>Fri, 03 Jul 2026 12:00:00 +0200</pubDate>
+</item>
+<item>
+<title>[Presse · Schaffhausen24] E-Scooter-Anbieter Voi übernimmt in Schaffhausen</title>
+<link>https://news.google.com/rss/articles/CBMilgFBVV95cUxPSmp3R1pNS2lZQS1iZGMzaHNWMzIxQV9SZTBuYjVpb0VpTEsySHpIMEE3VGJVU3EtTFVrOE84S0hMazZIa3k3UmJMMzRBc0luUGx0NDNTdHQzZC12LWtPQ1p6SXpidW1rV1FGejRWVzZ5OWpOT012RFVlMXdrRVhiLUxTdzlfYmVvbEdGbEdqTUNfdUd1cXc?oc=5</link>
+<guid isPermaLink="false">pr|03.07.2026|escooteranbietervoiubernimmtinschaffhausen</guid>
 <pubDate>Fri, 03 Jul 2026 12:00:00 +0200</pubDate>
 </item>
 <item>
@@ -359,12 +365,6 @@
 <link>https://www.shn.ch/region/neuhausen/2026-06-10/burgunwiese-vorstoss-wirft-fragen-zur-finanzierung-des-alterszentrums</link>
 <guid isPermaLink="false">pr|10.06.2026|burgunwiesevorstosswirftfragenzurfinanzierungdesalterszentru</guid>
 <pubDate>Wed, 10 Jun 2026 12:00:00 +0200</pubDate>
-</item>
-<item>
-<title>[Aktuelles] Pumptrack auf dem Pausenplatz Gemeindewiesen</title>
-<link>https://neuhausen.ch/aktuelles</link>
-<guid isPermaLink="false">ak|08.06.2026|Pumptrack auf dem Pausenplatz Gemeindewiesen</guid>
-<pubDate>Mon, 08 Jun 2026 12:00:00 +0200</pubDate>
 </item>
 </channel>
 </rss>
