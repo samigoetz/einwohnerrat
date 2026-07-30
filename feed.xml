@@ -5,12 +5,18 @@
 <link>https://neuhausen.ch/einwohnerrat</link>
 <description>Vorstösse, Berichte &amp; Anträge sowie Beschlüsse &amp; Protokolle des Einwohnerrats Neuhausen am Rheinfall. Automatisch aufbereitet.</description>
 <language>de-ch</language>
-<lastBuildDate>Thu, 30 Jul 2026 02:16:00 +0200</lastBuildDate>
+<lastBuildDate>Thu, 30 Jul 2026 12:05:00 +0200</lastBuildDate>
 <item>
 <title>[Aktuelles] Absage Rheinfallfeuerwerk und Höhenfeuer</title>
 <link>https://neuhausen.ch/aktuelles</link>
 <guid isPermaLink="false">ak|31.07.2026|Absage Rheinfallfeuerwerk und Höhenfeuer</guid>
 <pubDate>Fri, 31 Jul 2026 12:00:00 +0200</pubDate>
+</item>
+<item>
+<title>[Presse · SHN] Gefahr für den Verkehr? Darum entfernt Neuhausen so viele Zebrastreifen</title>
+<link>https://www.shn.ch/region/neuhausen/2026-07-30/gefahr-fuer-den-verkehr-darum-entfernt-neuhausen-so-viele-zebrastreifen</link>
+<guid isPermaLink="false">pr|30.07.2026|gefahrfurdenverkehrdarumentferntneuhausensovielezebrastreife</guid>
+<pubDate>Thu, 30 Jul 2026 12:00:00 +0200</pubDate>
 </item>
 <item>
 <title>[Presse · tagesanzeiger.ch] Kanton Schaffhausen: Trockenheit legt Feuerwerk am Rheinfall lahm</title>
@@ -358,12 +364,6 @@
 <title>[Presse · SHN] Weshalb kommt die Erstklässlerin nicht ins nächstgelegene Schulhaus? Der Neuhauser Bildungsreferent klärt auf</title>
 <link>https://www.shn.ch/region/neuhausen/2026-06-11/weshalb-kommt-die-erstklaesslerin-nicht-ins-naechstgelegene-schulhaus</link>
 <guid isPermaLink="false">pr|11.06.2026|weshalbkommtdieerstklasslerinnichtinsnachstgelegeneschulhaus</guid>
-<pubDate>Thu, 11 Jun 2026 12:00:00 +0200</pubDate>
-</item>
-<item>
-<title>[Presse · SHN] Nach falscher Zahl im Neuhauser Abstimmungsmagazin: Beschwerde hat keinen Erfolg</title>
-<link>https://www.shn.ch/region/neuhausen/2026-06-11/nach-falscher-zahl-im-neuhauser-abstimmungsmagazin-beschwerde-hat</link>
-<guid isPermaLink="false">pr|11.06.2026|nachfalscherzahlimneuhauserabstimmungsmagazinbeschwerdehatke</guid>
 <pubDate>Thu, 11 Jun 2026 12:00:00 +0200</pubDate>
 </item>
 </channel>
