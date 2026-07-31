@@ -5,7 +5,13 @@
 <link>https://neuhausen.ch/einwohnerrat</link>
 <description>Vorstösse, Berichte &amp; Anträge sowie Beschlüsse &amp; Protokolle des Einwohnerrats Neuhausen am Rheinfall. Automatisch aufbereitet.</description>
 <language>de-ch</language>
-<lastBuildDate>Thu, 30 Jul 2026 22:48:00 +0200</lastBuildDate>
+<lastBuildDate>Fri, 31 Jul 2026 10:11:00 +0200</lastBuildDate>
+<item>
+<title>[Aktuelles] Schalter und Büros schliessen heute um 16.00 Uhr</title>
+<link>https://neuhausen.ch/aktuelles</link>
+<guid isPermaLink="false">ak|31.07.2026|Schalter und Büros schliessen heute um 16.00 Uhr</guid>
+<pubDate>Fri, 31 Jul 2026 12:00:00 +0200</pubDate>
+</item>
 <item>
 <title>[Aktuelles] Absage Rheinfallfeuerwerk und Höhenfeuer</title>
 <link>https://neuhausen.ch/aktuelles</link>
@@ -359,12 +365,6 @@
 <link>https://www.shn.ch/region/neuhausen/2026-06-12/wie-auf-einer-achterbahn-neuhausens-gemeindekasse-sprudelt-ueber-doch</link>
 <guid isPermaLink="false">pr|12.06.2026|wieaufeinerachterbahnneuhausensgemeindekassesprudeltuberdoch</guid>
 <pubDate>Fri, 12 Jun 2026 12:00:00 +0200</pubDate>
-</item>
-<item>
-<title>[Bericht &amp; Antrag] Bericht und Antrag Pensenerhöhung Technische Betriebe</title>
-<link>https://neuhausen.ch/fileupload/Bericht und Antrag Pensenerhöhung Technische Betriebe.pdf</link>
-<guid isPermaLink="false">ba|11.06.2026|Bericht und Antrag Pensenerhöhung Technische Betriebe</guid>
-<pubDate>Thu, 11 Jun 2026 12:00:00 +0200</pubDate>
 </item>
 </channel>
 </rss>
