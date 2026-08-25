@@ -5,7 +5,7 @@
 <link>https://neuhausen.ch/einwohnerrat</link>
 <description>Vorstösse, Berichte &amp; Anträge sowie Beschlüsse &amp; Protokolle des Einwohnerrats Neuhausen am Rheinfall. Automatisch aufbereitet.</description>
 <language>de-ch</language>
-<lastBuildDate>Tue, 25 Aug 2026 12:42:00 +0200</lastBuildDate>
+<lastBuildDate>Tue, 25 Aug 2026 13:36:00 +0200</lastBuildDate>
 <item>
 <title>[Presse · SHN] Riesenwelse beim Rheinfall: Was im Rhein unter der Oberfläche lauert</title>
 <link>https://www.shn.ch/region/neuhausen/2026-08-25/riesenwelse-beim-rheinfall-was-im-rhein-unter-der-oberflaeche-lauert</link>
@@ -28,6 +28,12 @@
 <title>[Presse · SHN] Rauch steigt hoch in Neuhausen: Ein Gebäude und ein Auto bei der Firma Trybol stehen in Brand</title>
 <link>https://www.shn.ch/region/neuhausen/2026-08-25/rauch-steigt-hoch-in-neuhausen-ein-gebaeude-und-ein-auto-bei-der-firma</link>
 <guid isPermaLink="false">pr|25.08.2026|rauchsteigthochinneuhauseneingebaudeundeinautobeiderfirmatry</guid>
+<pubDate>Tue, 25 Aug 2026 12:00:00 +0200</pubDate>
+</item>
+<item>
+<title>[Presse · SHN] Rauch stieg hoch in Neuhausen: Ein Gebäude und ein Auto bei der Firma Trybol standen in Brand</title>
+<link>https://www.shn.ch/region/neuhausen/2026-08-25/rauch-stieg-hoch-in-neuhausen-ein-gebaeude-und-ein-auto-bei-der-firma</link>
+<guid isPermaLink="false">pr|25.08.2026|rauchstieghochinneuhauseneingebaudeundeinautobeiderfirmatryb</guid>
 <pubDate>Tue, 25 Aug 2026 12:00:00 +0200</pubDate>
 </item>
 <item>
@@ -358,12 +364,6 @@
 <title>[Presse · SHN] Wo der Rheinfall zum Dancefloor wird</title>
 <link>https://www.shn.ch/region/neuhausen/2026-07-26/wo-der-rheinfall-zum-dancefloor-wird</link>
 <guid isPermaLink="false">pr|26.07.2026|woderrheinfallzumdancefloorwird</guid>
-<pubDate>Sun, 26 Jul 2026 12:00:00 +0200</pubDate>
-</item>
-<item>
-<title>[Presse · SHN] Wo der Rheinfall zum Dancefloor wird: Die besten Bilder von der NXT Stop Dayparty</title>
-<link>https://www.shn.ch/region/neuhausen/2026-07-26/wo-der-rheinfall-zum-dancefloor-wird-die-besten-bilder-von-der-nxt-stop</link>
-<guid isPermaLink="false">pr|26.07.2026|woderrheinfallzumdancefloorwirddiebestenbildervondernxtstopd</guid>
 <pubDate>Sun, 26 Jul 2026 12:00:00 +0200</pubDate>
 </item>
 </channel>
