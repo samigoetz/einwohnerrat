@@ -5,12 +5,18 @@
 <link>https://neuhausen.ch/einwohnerrat</link>
 <description>Vorstösse, Berichte &amp; Anträge sowie Beschlüsse &amp; Protokolle des Einwohnerrats Neuhausen am Rheinfall. Automatisch aufbereitet.</description>
 <language>de-ch</language>
-<lastBuildDate>Mon, 07 Sep 2026 12:08:00 +0200</lastBuildDate>
+<lastBuildDate>Mon, 07 Sep 2026 18:24:00 +0200</lastBuildDate>
 <item>
 <title>[Aktuelles] Spezielle Öffnungszeiten der Schalter am 10. September 2026</title>
 <link>https://neuhausen.ch/aktuelles</link>
 <guid isPermaLink="false">ak|10.09.2026|Spezielle Öffnungszeiten der Schalter am 10. September 2026</guid>
 <pubDate>Thu, 10 Sep 2026 12:00:00 +0200</pubDate>
+</item>
+<item>
+<title>[Presse · SHN] Ertrunkener im Rhein war allein unterwegs</title>
+<link>https://www.shn.ch/region/neuhausen/2026-09-07/ertrunkener-im-rhein-war-allein-unterwegs</link>
+<guid isPermaLink="false">pr|07.09.2026|ertrunkenerimrheinwaralleinunterwegs</guid>
+<pubDate>Mon, 07 Sep 2026 12:00:00 +0200</pubDate>
 </item>
 <item>
 <title>[Presse · Südkurier] Drama in Schaffhausen: 24-Jähriger ertrinkt beim Baden im Rhein</title>
@@ -358,12 +364,6 @@
 <title>[Presse · Schaffhausen24] Stelldichein Schweizer Prominenz</title>
 <link>https://news.google.com/rss/articles/CBMif0FVX3lxTE16bHIweEJYUEk2SHh5bW0zNzRqRE16SlZoQTMwRW1XQ1NLTEFDSlJIdTFadndDMEV6a0xTdW5sTmZqZDFqaXhieWhTRjE4X2FDUzdQTWF0V0FMaDdUQk9JLVNkLU54WWtQd0ZRVDNMNGxwZGhhSUVFOVhVX2FiVFU?oc=5</link>
 <guid isPermaLink="false">pr|18.08.2026|stelldicheinschweizerprominenz</guid>
-<pubDate>Tue, 18 Aug 2026 12:00:00 +0200</pubDate>
-</item>
-<item>
-<title>[Presse · Nau] Neuhausen am Rheinfall: Unbekannte zerkratzen Auto auf 2,3 Metern</title>
-<link>https://news.google.com/rss/articles/CBMirAFBVV95cUxOcXA4aEZvWlZQRXZ2LU1jdTc4RUMyMEZ0WVJjbFRwOG5majR1UWJEb2l2endTdTUxZS1XNmtEV082UVVCRkRRT3puOWRzaUNKSTVwanVEMkVwOUZYaHNmSUxUQzVacFJuWThqMlY3bWcyS3FzUHVicTJwQktDMVZHRDVlLTc1NG51MDkxS21SRXZXMEM5cWozUE9hdnJfVEtEeExmdlc5YThHZmpw?oc=5</link>
-<guid isPermaLink="false">pr|18.08.2026|neuhausenamrheinfallunbekanntezerkratzenautoauf23metern</guid>
 <pubDate>Tue, 18 Aug 2026 12:00:00 +0200</pubDate>
 </item>
 </channel>
