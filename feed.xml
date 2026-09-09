@@ -5,7 +5,7 @@
 <link>https://neuhausen.ch/einwohnerrat</link>
 <description>Vorstösse, Berichte &amp; Anträge sowie Beschlüsse &amp; Protokolle des Einwohnerrats Neuhausen am Rheinfall. Automatisch aufbereitet.</description>
 <language>de-ch</language>
-<lastBuildDate>Wed, 09 Sep 2026 02:04:00 +0200</lastBuildDate>
+<lastBuildDate>Wed, 09 Sep 2026 06:32:00 +0200</lastBuildDate>
 <item>
 <title>[Aktuelles] Vitaparcours ist wieder zugänglich</title>
 <link>https://neuhausen.ch/aktuelles</link>
@@ -265,6 +265,12 @@
 <pubDate>Tue, 25 Aug 2026 12:00:00 +0200</pubDate>
 </item>
 <item>
+<title>[Presse · freizeit.ch] Explorial-Trail Neuhausen am Rheinfall</title>
+<link>https://news.google.com/rss/articles/CBMifEFVX3lxTFAyZGhUeF90YVFIT1BCaW9tZExLWnRWR0VLZjVwbmF6N2hBa1Y3bzRZeHhmUWFNdWpYOTBKZ1c2R255VmNLSkNMRlBqcVdvRmE1dHVPTk96ejNXMHRyRVp0aVltVXZUSmgxQm1iVkdHREk1aWZkSk03Um1ybTE?oc=5</link>
+<guid isPermaLink="false">pr|25.08.2026|explorialtrailneuhausenamrheinfall</guid>
+<pubDate>Tue, 25 Aug 2026 12:00:00 +0200</pubDate>
+</item>
+<item>
 <title>[Presse · SHN] Ein Fehler in der Matrix: Cemre Nomer macht aus Störungen Kunst</title>
 <link>https://www.shn.ch/region/neuhausen/2026-08-23/ein-fehler-in-der-matrix-cemre-nomer-macht-aus-stoerungen-kunst</link>
 <guid isPermaLink="false">pr|23.08.2026|einfehlerindermatrixcemrenomermachtausstorungenkunst</guid>
@@ -359,12 +365,6 @@
 <link>https://news.google.com/rss/articles/CBMisAFBVV95cUxQcGt4bjN5UGdqWE9xMEJUQlYtN0dSUGtDcUZYdGZLMEFvdktEYUFrLWtEYmZTT2hTajFWOEp0R2Uycl9wdWxaTU9Ua2x6cVhSZDZlNXJkblNOLVZnSHEybDZGRG9QNUhsQUo2SVA5U3dDOGR6b2NrclY3SDFGVENvb21oVk9DQWJIbmRDTzdwV0JDRUh2SU53bnVjeWo0TzVNWUp3ZTVhYlpwMDFRcmlOTw?oc=5</link>
 <guid isPermaLink="false">pr|19.08.2026|neuhausenarsheinbruchinhobbyraumepolizeisuchtzeugen</guid>
 <pubDate>Wed, 19 Aug 2026 12:00:00 +0200</pubDate>
-</item>
-<item>
-<title>[Presse · Schaffhausen24] Stelldichein Schweizer Prominenz</title>
-<link>https://news.google.com/rss/articles/CBMif0FVX3lxTE16bHIweEJYUEk2SHh5bW0zNzRqRE16SlZoQTMwRW1XQ1NLTEFDSlJIdTFadndDMEV6a0xTdW5sTmZqZDFqaXhieWhTRjE4X2FDUzdQTWF0V0FMaDdUQk9JLVNkLU54WWtQd0ZRVDNMNGxwZGhhSUVFOVhVX2FiVFU?oc=5</link>
-<guid isPermaLink="false">pr|18.08.2026|stelldicheinschweizerprominenz</guid>
-<pubDate>Tue, 18 Aug 2026 12:00:00 +0200</pubDate>
 </item>
 </channel>
 </rss>
