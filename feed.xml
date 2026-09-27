@@ -5,7 +5,19 @@
 <link>https://neuhausen.ch/einwohnerrat</link>
 <description>Vorstösse, Berichte &amp; Anträge sowie Beschlüsse &amp; Protokolle des Einwohnerrats Neuhausen am Rheinfall. Automatisch aufbereitet.</description>
 <language>de-ch</language>
-<lastBuildDate>Sun, 27 Sep 2026 10:01:00 +0200</lastBuildDate>
+<lastBuildDate>Sun, 27 Sep 2026 15:51:00 +0200</lastBuildDate>
+<item>
+<title>[Aktuelles] Abstimmungsresultate vom 27. September 2026</title>
+<link>https://neuhausen.ch/aktuelles</link>
+<guid isPermaLink="false">ak|27.09.2026|Abstimmungsresultate vom 27. September 2026</guid>
+<pubDate>Sun, 27 Sep 2026 12:00:00 +0200</pubDate>
+</item>
+<item>
+<title>[Presse · AD HOC NEWS] Schnäggä-Sunntig am Rheinfall steigt am 18. Oktober</title>
+<link>https://news.google.com/rss/articles/CBMirAFBVV95cUxOeUFsSGk0YUtpdDg4ZHFEQnppb09zdHpKNkZ3R3pLUzVKMU5mU0tPMzlqWUxJQ2x5QWFqMjlSWDFVQWF6WDB4THlDVkFsN1pabFNmQjFHV2NieWo3cVhrNUVhYURvY21zdXFvbE1FcHhRVzVXakhZS1hTRGVDekFETGx5Ti1oU0ZhR3JPTUFkeWlfTTBEWjR0TzFyNlRyb3owTGJTaGgwLVYtejlr?oc=5</link>
+<guid isPermaLink="false">pr|27.09.2026|schnaggasunntigamrheinfallsteigtam18oktober</guid>
+<pubDate>Sun, 27 Sep 2026 12:00:00 +0200</pubDate>
+</item>
 <item>
 <title>[Presse · SHN] Die ukrainische Schule Mrija feiert ihr erstes Jahr</title>
 <link>https://www.shn.ch/region/neuhausen/2026-09-26/die-ukrainische-schule-mrija-feiert-ihr-erstes-jahr</link>
@@ -271,15 +283,15 @@
 <pubDate>Wed, 02 Sep 2026 12:00:00 +0200</pubDate>
 </item>
 <item>
-<title>[Aktuelles] Vitaparcours vorübergehend gesperrt – Finnenbahn weiterhin geöffnet</title>
-<link>https://neuhausen.ch/aktuelles</link>
-<guid isPermaLink="false">ak|01.09.2026|Vitaparcours vorübergehend gesperrt – Finnenbahn weiterhin geöffnet</guid>
-<pubDate>Tue, 01 Sep 2026 12:00:00 +0200</pubDate>
-</item>
-<item>
 <title>[Aktuelles] Gemeinde unterstützt Museumsnacht 2026</title>
 <link>https://neuhausen.ch/aktuelles</link>
 <guid isPermaLink="false">ak|01.09.2026|Gemeinde unterstützt Museumsnacht 2026</guid>
+<pubDate>Tue, 01 Sep 2026 12:00:00 +0200</pubDate>
+</item>
+<item>
+<title>[Aktuelles] Vitaparcours vorübergehend gesperrt – Finnenbahn weiterhin geöffnet</title>
+<link>https://neuhausen.ch/aktuelles</link>
+<guid isPermaLink="false">ak|01.09.2026|Vitaparcours vorübergehend gesperrt – Finnenbahn weiterhin geöffnet</guid>
 <pubDate>Tue, 01 Sep 2026 12:00:00 +0200</pubDate>
 </item>
 <item>
@@ -353,18 +365,6 @@
 <link>https://neuhausen.ch/aktuelles</link>
 <guid isPermaLink="false">ak|27.08.2026|Lockerung Feuerverbot im Siedlungsgebiet</guid>
 <pubDate>Thu, 27 Aug 2026 12:00:00 +0200</pubDate>
-</item>
-<item>
-<title>[Presse · Nau.ch] Neuhausen am Rheinfall SH: Erhöhte Gefahr durch abbrechende Äste im Wald</title>
-<link>https://news.google.com/rss/articles/CBMitwFBVV95cUxOYlhtZlpfRjcwUHlqMmp6YjM0SVM4Y3R0WDhJVUh4QnJmRjc5ejRsUlVjVTlKT1dVaFY4VUN5SlNtSWZaWHltTi0zY2tmQVhYcTU0Zi1DckxsUFcyOTFLZkoydklxVnpjTHNBRm9YWGZieXp1WkVBeU81NTRfRDFwajZ6MklJWFI2eHd3QWVzdmxWTjdscVVZbGt5WEVWN1NWUXZkYTlsM3hxRVJvYjRBZ19KbkhKZkk?oc=5</link>
-<guid isPermaLink="false">pr|27.08.2026|neuhausenamrheinfallsherhohtegefahrdurchabbrechendeasteimwal</guid>
-<pubDate>Thu, 27 Aug 2026 12:00:00 +0200</pubDate>
-</item>
-<item>
-<title>[Presse · SHN] Riesenwelse beim Rheinfall: Was im Rhein unter der Oberfläche lauert</title>
-<link>https://www.shn.ch/region/neuhausen/2026-08-25/riesenwelse-beim-rheinfall-was-im-rhein-unter-der-oberflaeche-lauert</link>
-<guid isPermaLink="false">pr|25.08.2026|riesenwelsebeimrheinfallwasimrheinunterderoberflachelauert</guid>
-<pubDate>Tue, 25 Aug 2026 12:00:00 +0200</pubDate>
 </item>
 </channel>
 </rss>
