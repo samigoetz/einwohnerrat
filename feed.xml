@@ -5,7 +5,7 @@
 <link>https://neuhausen.ch/einwohnerrat</link>
 <description>Vorstösse, Berichte &amp; Anträge sowie Beschlüsse &amp; Protokolle des Einwohnerrats Neuhausen am Rheinfall. Automatisch aufbereitet.</description>
 <language>de-ch</language>
-<lastBuildDate>Fri, 06 Nov 2026 10:15:00 +0100</lastBuildDate>
+<lastBuildDate>Fri, 06 Nov 2026 18:24:00 +0100</lastBuildDate>
 <item>
 <title>[Beschluss/Protokoll] Beschlussprotokoll</title>
 <link>https://neuhausen.ch/fileupload/20261105 7. Sitzung Beschlussprotokoll.pdf</link>
@@ -16,6 +16,18 @@
 <title>[Presse · SHN] Theater im Theater: Die neue Spielsaison im Neuhauser Central</title>
 <link>https://www.shn.ch/region/neuhausen/2026-11-06/theater-im-theater-die-neue-spielsaison-im-neuhauser-central</link>
 <guid isPermaLink="false">pr|06.11.2026|theaterimtheaterdieneuespielsaisonimneuhausercentral</guid>
+<pubDate>Fri, 06 Nov 2026 12:00:00 +0100</pubDate>
+</item>
+<item>
+<title>[Presse · SHN] Vorfreude auf das neue Neuhauser Schulhaus</title>
+<link>https://www.shn.ch/region/neuhausen/2026-11-06/vorfreude-auf-das-neue-neuhauser-schulhaus</link>
+<guid isPermaLink="false">pr|06.11.2026|vorfreudeaufdasneueneuhauserschulhaus</guid>
+<pubDate>Fri, 06 Nov 2026 12:00:00 +0100</pubDate>
+</item>
+<item>
+<title>[Presse · SHN] Neuhauser Parlament will autonomen Bus und pünktlicheren ÖV</title>
+<link>https://www.shn.ch/region/neuhausen/2026-11-06/neuhauser-parlament-will-autonomen-bus-und-puenktlicheren-oev</link>
+<guid isPermaLink="false">pr|06.11.2026|neuhauserparlamentwillautonomenbusundpunktlicherenov</guid>
 <pubDate>Fri, 06 Nov 2026 12:00:00 +0100</pubDate>
 </item>
 <item>
@@ -40,6 +52,12 @@
 <title>[Presse · Bock, Schaffhausen] Kinderzentrum, Güterbahnhof, Kinderheim: Darüber stimmt die Stadt ab</title>
 <link>https://news.google.com/rss/articles/CBMirgFBVV95cUxPUnVtRFBQaE5SU3BlS0NCOXJJRG81V2hhc3hVT2U1LXJQOS0xTDdYV2hBS3Z5STNkalpGcGJDaUdwRVVQVnAzOElMZ0RFeUJIRXFyYllyUXBqUUNPbkJzSEw5aF8yZldEblJnQ2RPUGZzTHZlRDNkSkZ0clFnMXczd0JRY2FGNEVMSTVSWkFjWmlGZGVWUjNuanVnSTRHd0xNNVhiSi1fUHh5OTJCc1E?oc=5</link>
 <guid isPermaLink="false">pr|04.11.2026|kinderzentrumguterbahnhofkinderheimdaruberstimmtdiestadtab</guid>
+<pubDate>Wed, 04 Nov 2026 12:00:00 +0100</pubDate>
+</item>
+<item>
+<title>[Presse · Bock, Schaffhausen] Zerstörte Burgen, aufgehobene Klöster: Neue Bücher zur Schaffhauser Geschichte</title>
+<link>https://news.google.com/rss/articles/CBMivgFBVV95cUxOVDJIMjlVMy1ocGY1SndlaHgxM0QwWTFnckdBaU1EQjBpZ0k3bmtPR1JXRnlhODNsR1gxUlRmUWloa3hlR0N6V0xNaTZzbURUU0FiNFFkNEwxUUpraDFrWUsxYjh2eEhOUHJaTl9mRHUxWEs2OVRTM2ZCSnh0VFJiUUFQcXJNX0NfZmFoVUhHTzdkNEc3UEp4aE1lQXV2bWs1ZjF1b1ZmanBFX1l1NUJfQzl3aFpneWxmdkJJQi1n?oc=5</link>
+<guid isPermaLink="false">pr|04.11.2026|zerstorteburgenaufgehobeneklosterneuebucherzurschaffhauserge</guid>
 <pubDate>Wed, 04 Nov 2026 12:00:00 +0100</pubDate>
 </item>
 <item>
@@ -347,24 +365,6 @@
 <link>https://news.google.com/rss/articles/CBMilAFBVV95cUxNWGljak9kR0tQclFYb0t3NFBhNjNIUXlFN21iQUt6dkU0ckp1bl9QUmRGV0tuVG80REJIbmllMndicEJvUjdsTzJHaU02YXYtaVBJdkhNSTRVdkdsSHpkMnVsdnU5RmdJWUZvUVN2UkxGMG42d1VsZzNjVnpEVVhDQjc2d2RXNTA4YUZ2dDIyUHJvSmtj?oc=5</link>
 <guid isPermaLink="false">pr|13.10.2026|steuerfussinneuhausenbleibt2027unverandertneuhausenamrheinfa</guid>
 <pubDate>Tue, 13 Oct 2026 12:00:00 +0200</pubDate>
-</item>
-<item>
-<title>[Presse · Schaffhauser Nachrichten] Neuhausen: Autofahrer kollidiert mit Fussgängerschutzinsel und muss ins Spital</title>
-<link>https://news.google.com/rss/articles/CBMitgFBVV95cUxNekJtTXBCTDh3Y25QS3ZjQWlsQW5pTm1zRGREM0VPQ0ktMmYtUmNhWExLUURBU2RXcmpyX1hLUGZKVGl2RmV1a0c3bVozQldvTHpxOUdoYlgyelJoYjBtb1pEeEZMeWxCODdQT29Mc0s1V0NOVVROMmE0ZXYzSkVMNUJvMlEtVTBFbXI0X1hhYXFxQUR4YzlTWmVuQWN0WlhtMzFZdTAyRzRVUXA3VG1OaWtlZ3J6UQ?oc=5</link>
-<guid isPermaLink="false">pr|12.10.2026|neuhausenautofahrerkollidiertmitfussgangerschutzinselundmuss</guid>
-<pubDate>Mon, 12 Oct 2026 12:00:00 +0200</pubDate>
-</item>
-<item>
-<title>[Presse · Schaffhausen24] Neues Kulturprogramm in der Bergtrotte</title>
-<link>https://news.google.com/rss/articles/CBMihwFBVV95cUxQbWpIY19xOWZMY2hzc01MMTFoQzdnWDBaQTRMSWRlY3hDVzgyYnl4Q0Q0OVJiVVJMLUZZQ2p5U181WjJTMGd0OThnM2dSNElsUTVqemx4RW9KM29qa2F6T1JmeThKTUpqUk0zZC0ycWpxeHNtdDJPTldnUUxVeTdZYW9CaFRiRk0?oc=5</link>
-<guid isPermaLink="false">pr|12.10.2026|neueskulturprogramminderbergtrotte</guid>
-<pubDate>Mon, 12 Oct 2026 12:00:00 +0200</pubDate>
-</item>
-<item>
-<title>[Presse · Schaffhauser Nachrichten] Schaffhausen: Autofahrer kollidiert mit Fussgängerschutzinsel und muss ins Spital</title>
-<link>https://news.google.com/rss/articles/CBMiugFBVV95cUxOUFliUlhBanZwbVhDZ0pvcXVtTl9sSERZV0tCWVNFTUJvT0t5empndGVKbEpaR3V3Rkh4NnF6V29OZjctLVdFUjZTMkFqdWRVamhBOV9wQXNST3JndUNLVDZmQkZFNjA3djZaUWFlUXBJckc3T3BGS2NOREJpbmp0YkZkb1lqXzN2eTdDbWVISnF6Y1dJQmc4UFZZT0ZDTjROcGx2a2xXanJTQ3VpOVN3OUJjSHFwQ3BsUWc?oc=5</link>
-<guid isPermaLink="false">pr|12.10.2026|schaffhausenautofahrerkollidiertmitfussgangerschutzinselundm</guid>
-<pubDate>Mon, 12 Oct 2026 12:00:00 +0200</pubDate>
 </item>
 </channel>
 </rss>
